@@ -7,76 +7,6 @@ import "core:os"
 import "core:fmt"
 import "core:strings"
 
-Token :: tokenizer.Token
-
-
-generateNasmFromTokens :: proc(tokens:[]Token, outFile:string) {
-    os.remove(outFile)
-    fd, err := os.open(outFile, os.O_CREATE | os.O_WRONLY, 0o777)
-    if err == -1 {
-        fmt.assertf(false, "Error Opening output assembly")
-    }
-    defer os.close(fd)
-    sb : strings.Builder
-    strings.write_string(&sb, "global _start\n_start:\n")
-    sba := &sb
-
-    for &token in tokens {
-        switch token.type {
-            case .IntLit: {
-                strings.write_string(&sb, "   push ")
-                strings.write_int(&sb, token.value.(int))
-                strings.write_string(&sb, "\n")
-            }
-            case .Exit: {
-                nasm(sba, "mov rax, 60")
-                nasm(sba, "pop rdi")
-                nasm(sba, "syscall")
-                // strings.write_string(&sb, "   mov rax, 60\n")
-                // strings.write_string(&sb, "   pop rdi\n")
-                // strings.write_string(&sb, "   syscall\n")
-            }
-            case .Plus:{
-                nasm(sba, "pop rax")
-                nasm(sba, "pop rbx")
-                nasm(sba, "add rax, rbx")
-                nasm(sba, "push rax")
-                // strings.write_string(&sb, "   pop rax\n")
-                // strings.write_string(&sb, "   pop rbx\n")
-                // strings.write_string(&sb, "   add rax, rbx\n")
-                // strings.write_string(&sb, "   push rax\n")
-            }
-            case .Dash: {}
-            case .Ident:{
-                tokenizer.printLoc(token.loc)
-                fmt.printf("Invalid token of '%s'\n", token.value.(string))
-                os.exit(1)
-            }
-            case .Let: {}
-            case .Syscall1: {
-
-            }
-            case .StringLit: {
-
-            }
-            case .BoolLit: {
-
-            }
-            case .Eq: {
-
-            }
-            case .If: {
-
-            }
-            case .FloatLit: {
-
-            }
-        }
-    }
-    // Handle transforming into ASM
-    strings.write_string(&sb, "\n ; Safe exit if it makes it to the end\n   mov rax, 60\n   mov rdi, 0\n   syscall\n")
-    os.write_string(fd, strings.to_string(sb))
-}
 
 generateNasmFromAST :: proc(as : []ast.AST, outFile:string) {
     os.remove(outFile)
@@ -129,7 +59,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, as: ^ast.AST) {
                 &ty.value, "rdi", 
                 &ty.call, "rax")
             nasm(sb, "syscall")
-            pushReg(sb, "eax")
+            // pushReg(sb, "eax")
         }
     }
 }

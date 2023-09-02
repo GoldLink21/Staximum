@@ -5,10 +5,17 @@ macro Name : InputTypes > OutputTypes {
 }
 
 macro PI :> f32 {
+    let x {
+        // Requires 1 return value
+        1 2 +
+    }
+    
     3.14159268
 }
 
 macro add : i32 i32 > i32 {
+    // Holds top 2 values in stack
+    //  as easily accessible
     with a b {
         a b +
     }

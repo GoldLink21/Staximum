@@ -9,6 +9,7 @@ import "../tokenizer"
 import "../types"
 
 SYS_EXIT :: 60
+SYS_WRITE :: 1
 
 AST :: union #no_nil {
     ^PushLiteral,
@@ -33,9 +34,16 @@ BinOpsString : map[BinOps]string = {
     .Plus = "+",
     .Eq = "=",
 }
-
+UnaryOps :: enum {
+    CastFloatToInt,
+    CastIntToFloat
+}
+UnaryOpsString : map[UnaryOps]string = {
+    .CastFloatToInt = "(Float)",
+    .CastIntToFloat = "(Int)",
+}
 UnaryOp :: struct {
-    op: string,
+    op: UnaryOps,
     value: AST
 }
 PushLiteral :: union {
@@ -44,11 +52,22 @@ PushLiteral :: union {
 }
 Syscall1 :: struct {
     call: AST,
-    value: AST
+    value: AST,
+}
+VarDef :: struct {
+    ident : string,
+    value : AST,
 }
 
+Variable :: struct {
+    label:string,
+    type:types.Type,
+    // If written back into, then cannot optimize out
+    //  and must be put into .bss
+    redefined: bool,
+}
 
-resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
+resolveTokens :: proc(tokens:[]tokenizer.Token, varContext:rawptr) -> [dynamic]AST {
     out : [dynamic]AST = make([dynamic]AST)
     for i := 0; i < len(tokens); i += 1 {
         cur := tokens[i]
@@ -59,13 +78,13 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 value : ^PushLiteral = new(PushLiteral)
                 value ^= cur.value.(int)
 
-                types.pushType(.Int)
+                pushType(.Int)
                 append(&out, value)
             }
             case .Plus: {
                 // Requires 2 things on the stack
                 expectArgs(out, "+", 2, cur.loc)
-                if !types.applyTransIfValid(types.intrinsics[.Plus]) {
+                if !applyTransIfValid(types.intrinsics[.Plus]) {
                     fmt.printf("Invalid argument types for op '+'\n")
                     os.exit(1)
                 }
@@ -91,24 +110,29 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 value.value = pop(&out)
                 append(&out, value)
             }
-            case .Dash:  { assert(false, "TODO") }
-            case .Ident: { assert(false, "TODO") }
-            case .Let:   { assert(false, "TODO") }
-            case .StringLit: { /*assert(false, "TODO")*/ }
-            case .If:    { assert(false, "TODO") }
-            case .Eq:    {
-                // Make comparison
-            }
+            
             case .BoolLit: {
                 value : ^PushLiteral = new(PushLiteral)
                 value ^= cur.value.(bool)
-                types.pushType(.Bool)
+                pushType(.Bool)
                 append(&out, value)
             }
+            case .StringLit: { assert(false, "TODO") }
+            case .Print: {
+
+            }
+            case .If: { assert(false, "TODO") }
+            case .Eq: { assert(false, "TODO") }
+            case .End: { assert(false, "TODO") }
+            case .Let: { assert(false, "TODO") }
+            case .Dash: { assert(false, "TODO") }
+            case .Ident: { assert(false, "TODO") }
+            case .OParen: { assert(false, "TODO") }
+            case .CParen: { assert(false, "TODO") }
             case .FloatLit: { assert(false, "TODO") }
         }
         // Check just in case
-        if len(types.typeStack) != len(out) {
+        if len(typeStack) != len(out) {
             fmt.printf("WARN: typestack does not match length of output stack")
         }
     }
@@ -151,8 +175,7 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             strings.write_string(sb, "}\n")
         }
         case ^UnaryOp: {
-            // fmt.printf("1 %s {{\n", ty.op)
-            strings.write_string(sb, ty.op)
+            strings.write_string(sb, UnaryOpsString[ty.op])
             strings.write_string(sb, " {\n")           
             printASTHelper(ty.value, sb, false, indent + 1)
             for i in 0..<indent do strings.write_byte(sb, ' ')

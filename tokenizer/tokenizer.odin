@@ -12,41 +12,6 @@ printLoc :: proc(loc:Location){
     fmt.printf("%s %d:%d ", loc.file, loc.line + 1, loc.col)
 }
 
-TokenType :: enum {
-    Ident = 0,
-    IntLit,
-    BoolLit,
-    StringLit,
-    FloatLit,
-    // CString,
-    Exit,
-    Plus,
-    Let,
-    Dash,
-    Syscall1,
-    If,
-    Eq,
-}
-IdentifierTokens : map[string]TokenType = {
-    "exit" = .Exit,
-    "syscall1" = .Syscall1,
-    "let" = .Let,
-    "if" = .If,
-}
-SymbolTokens : map[u8]TokenType = {
-    '-' = .Dash,
-    '+' = .Plus,
-    '=' = .Eq,
-}
-
-
-
-TokenValue :: union {
-    string,
-    int,
-    f32,
-    bool,
-}
 
 Token :: struct {
     type : TokenType,
@@ -58,34 +23,6 @@ Tokenizer :: struct {
     text : string,
     loc: Location,
     i: int
-}
-
-printToken :: proc(using token:Token) {
-    printLoc(loc)
-    switch token.type {
-        case .Ident:    fmt.printf("<Ident '%s'>", value.(string))
-        case .IntLit:   fmt.printf("<Int '%d'>", value.(int))
-        case .FloatLit: fmt.printf("<Float '%f'>", value.(f32))
-        case .StringLit:fmt.printf("<String \"%s\">", value.(string))
-        case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
-        case .Exit:     fmt.printf("<Exit>")
-        case .Plus:     fmt.printf("<+>")
-        case .Dash:     fmt.printf("<->")
-        case .Let:      fmt.printf("<Let>")
-        case .Syscall1: fmt.printf("<Syscall1>")
-        case .If:       fmt.printf("<If>")
-        case .Eq:       fmt.printf("<=>")
-
-        // Left without default for compiler complaint on adding more
-    }
-    // fmt.printf("<>")
-}
-
-printTokens :: proc(tokens: []Token) {
-    for token in tokens {
-        printToken(token)
-        fmt.printf("\n")
-    }
 }
 
 tokenize :: proc(content : string, file: string="") -> [dynamic]Token {
@@ -300,7 +237,7 @@ expect :: proc(tok:^Tokenizer, char:u8, skipWhitespace:bool = true) {
 }
 
 requireNext :: proc(tok:^Tokenizer, cb : proc(u8) -> bool) {
-    
+
 }
 
 
