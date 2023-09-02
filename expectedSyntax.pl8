@@ -1,0 +1,22 @@
+// Generate macro with the name Name that takes 
+//  an InputTypes and returns an OutputTypes
+macro Name : InputTypes > OutputTypes {
+    InnerTokens
+}
+
+macro PI :> f32 {
+    3.14159268
+}
+
+macro add : i32 i32 > i32 {
+    with a b {
+        a b +
+    }
+}
+
+macro noop {
+    // Comment
+}
+
+1 2 add
+
