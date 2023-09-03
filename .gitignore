@@ -1,4 +1,4 @@
-*.S
+out.S
 *.o
 pl8
 out

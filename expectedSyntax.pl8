@@ -4,16 +4,29 @@ macro Name : InputTypes > OutputTypes {
     InnerTokens
 }
 
-macro PI :> f32 {
+macro stdout > int {1}
+// Same as `macro stdout :> int {1}`
+macro SYS_WRITE > int {1}
+
+// String on top and int under
+macro print : string int {
+    stdout SYS_WRITE syscall3
+}
+
+macro PI > f32 {
     let x {
         // Requires 1 return value
         1 2 +
     }
+    x print // Should print 3
+    8 x !
+
+    x print // Should print 8
     
     3.14159268
 }
 
-macro add : i32 i32 > i32 {
+macro add : int int > int {
     // Holds top 2 values in stack
     //  as easily accessible
     with a b {
@@ -21,9 +34,9 @@ macro add : i32 i32 > i32 {
     }
 }
 
+// Can skip : and > if takes nothing and returns nothing
 macro noop {
     // Comment
 }
 
 1 2 add
-
