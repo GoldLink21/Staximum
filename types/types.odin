@@ -32,18 +32,22 @@ intrinsics : map[tokenizer.TokenType][]Intrinsic = {
     .Plus = {
         { {.Int,   .Int},   {.Int  } },
         { {.Float, .Float}, {.Float} },
-        { {.Float, .Int},   {.Float} },
-        { {.Int,   .Float}, {.Float} },
+        // Should convert to needing explicit casting
+        // { {.Float, .Int},   {.Float} },
+        // { {.Int,   .Float}, {.Float} },
     },
     .Dash = {
         { {.Int,   .Int},   {.Int  } },
         { {.Float, .Float}, {.Float} },
-        { {.Float, .Int},   {.Float} },
-        { {.Int,   .Float}, {.Float} },
+        // Need explicit casting
+        // { {.Float, .Int},   {.Float} },
+        // { {.Int,   .Float}, {.Float} },
     },
     .Eq = {
         { {.Int,   .Int},   {.Bool} },
         { {.Float, .Float}, {.Bool} },
     },
-    .Syscall1 = {{{.Int, .Any}, {.Any} } }
+    .Syscall1 = {{{.Int, .Any}, {.Any} } },
+    .Syscall3 = {{{.Int, .Any, .Any, .Any}, {.Any} } }
+
 }

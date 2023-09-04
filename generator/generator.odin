@@ -81,9 +81,9 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 &ty.value, "rdi", 
                 &ty.call, "rax")
             nasm(sb, "syscall")
-            // pushReg(sb, "eax")
+            pushReg(sb, "rax")
         }
-        case ^ast.Syscall3: {
+        case ^Syscall3: {
             generateNasmFromASTHelp(sb, ctx, &ty.arg3)
             generateNasmFromASTHelp(sb, ctx, &ty.arg2)
             generateNasmFromASTHelp(sb, ctx, &ty.arg1)
@@ -93,6 +93,11 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             popReg(sb, "rsi")
             popReg(sb, "rdx")
             nasm(sb, "syscall")
+            pushReg(sb, "rax")
+        }
+        case ^Drop: {
+            // Move the stack pointer back to ignore the value that was there
+            nasm(sb, "add rsp,8")
         }
     }
 }
@@ -150,7 +155,7 @@ astIntToRegister2 :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, 
 
 // Adds an indented instruction with a newline
 nasm :: proc(sb : ^strings.Builder, instruction : string) {
-    fmt.sbprintf(sb, "   %\n", instruction)
+    fmt.sbprintf(sb, "   %s\n", instruction)
 } 
 // Loads an integer into a register
 loadRegWithInt :: proc(sb: ^strings.Builder, reg:string, value:int) {
@@ -180,9 +185,39 @@ generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
     nasm(sb, "section .data")
     for k, v in ctx.stringLits {
         strings.write_string(sb, v)
-        strings.write_string(sb, ": db \'")
-        strings.write_string(sb, k)
-        strings.write_string(sb, "\',10\n")
+        strings.write_string(sb, ": db ")
+        escapeStringToASM(sb, k)
+        strings.write_byte(sb, '\n')
+        // strings.write_string(sb, k)
+        // strings.write_string(sb, "\',10\n")
         // Should I preload their lengths too?
+    }
+}
+
+generateBSSSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
+    
+}
+
+escapeStringToASM :: proc(sb:^strings.Builder,value:string) {
+    lastEscaped := false
+    for c,i in value {
+        if lastEscaped do strings.write_byte(sb, ',')
+        switch c {
+            case '\r', '\n', '\t', 0, '\'': {
+                if !lastEscaped && i != 0 {
+                    // Need to close previous string
+                    strings.write_string(sb, "',")
+                }
+                strings.write_int(sb, int(c))
+                lastEscaped = true
+            }
+            case: {
+                if lastEscaped {
+                    strings.write_byte(sb, '\'')
+                    lastEscaped = false
+                }
+                strings.write_byte(sb, u8(c))
+            }
+        }
     }
 }

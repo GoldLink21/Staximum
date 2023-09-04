@@ -2,6 +2,7 @@ package ast
 
 import "../types"
 import "core:fmt"
+import "core:os"
 
 Type :: types.Type
 Intrinsic :: types.Intrinsic
@@ -70,10 +71,12 @@ expectTypes :: proc(types: []Type) {
     for ty in types {
         top := pop(&typeStack)
         if top != ty && ty != .Any {
-            fmt.assertf(false, "Expected type of '%s' but got '%s'\n", 
+            
+            fmt.printf("Expected type of '%s' but got '%s'\n", 
                 fmt.enum_value_to_string(ty), 
                 fmt.enum_value_to_string(top)
             )
+            os.exit(1)
         }
     }
 }

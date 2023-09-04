@@ -17,7 +17,9 @@ TokenType :: enum {
     Plus,
     Dash,
     Bang,
+    Drop,
     Print,
+    Macro,
     OParen,
     CParen,
     // Syscall0,
@@ -34,7 +36,9 @@ IdentifierTokens : map[string]TokenType = {
     "let" = .Let,
     "end" = .End,
     "exit" = .Exit,
+    "drop" = .Drop,
     "print" = .Print,
+    "macro" = .Macro,
     "syscall1" = .Syscall1,
     "syscall3" = .Syscall3,
 }
@@ -73,8 +77,10 @@ printToken :: proc(using token:Token) {
         case .If:       fmt.printf("<If>")
         case .End:      fmt.printf("<End>")
         case .Let:      fmt.printf("<Let>")
+        case .Drop:     fmt.printf("<Drop>")
         case .Exit:     fmt.printf("<Exit>")
         case .Print:    fmt.printf("<Print>")
+        case .Macro:    fmt.printf("<Macro>")
         // case .Syscall0: fmt.printf("<Syscall0>")
         case .Syscall1: fmt.printf("<Syscall1>")
         // case .Syscall2: fmt.printf("<Syscall2>")
@@ -85,7 +91,6 @@ printToken :: proc(using token:Token) {
 
         // Left without default for compiler complaint on adding more
     }
-    // fmt.printf("<>")
 }
 
 printTokens :: proc(tokens: []Token) {

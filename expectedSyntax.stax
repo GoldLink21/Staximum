@@ -13,20 +13,22 @@ macro print : string int {
     stdout SYS_WRITE syscall3
 }
 
-macro PI > f32 {
+macro PI > float {
+    3.14159268
+}
+
+macro add : int int > int {
+    // Variable Declaration
     let x {
         // Requires 1 return value
         1 2 +
     }
     x print // Should print 3
+    // Update value in x
     8 x !
 
     x print // Should print 8
-    
-    3.14159268
-}
 
-macro add : int int > int {
     // Holds top 2 values in stack
     //  as easily accessible
     with a b {

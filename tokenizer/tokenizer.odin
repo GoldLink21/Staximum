@@ -2,6 +2,7 @@ package tokenizer
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
 
 Location :: struct {
     line, col: uint,
@@ -29,25 +30,44 @@ tokenize :: proc(content : string, file: string="") -> [dynamic]Token {
     tok : Tokenizer = {
         text=content[:],
         loc={ 0,0, file[:] },
-        i = -1,
+        i = 0,
     }
     cLen := len(content)
     curLoc : Location
     output : [dynamic]Token = make([dynamic]Token)
-    for hasNext(&tok) {
-        char, _ := next(&tok)
+    // for hasNext(&tok) {
+        // char, _ := next(&tok)
+    for char := curT(&tok); hasNext(&tok); char, _ = next(&tok) {
         switch {
             // Skip Whitespace
-            case isWhitespace(char): {}
-            // Null terminator catch, just in case
-            case char == 0:{}
+            case isWhitespace(char), char == 0: {}
             case isAlpha(char): {
                 append(&output, parseIdent(&tok))
             }
-            case isNum(char): { 
+            case isNum(char), char == '.': { 
                 append(&output, parseNumber(&tok))
             }
-            case char == '.': { printLoc(tok.loc); notImpl("Number Decimals") }
+            case char == '-': {
+                // First check for negative numbers
+                if hasNext(&tok) {
+                    if val, _ := peek(&tok); isNum(val) {
+                        next(&tok)
+                        token := parseNumber(&tok)
+                        switch type in token.value {
+                            case int: { token.value = -1 * type }
+                            case f32: { token.value = -1 * type }
+                            case bool, string: {
+                                assert(false, "BUG: Somehow got bool or string value " +
+                                    "when parsing number\n")
+                            }
+                        }
+                        append(&output, token)
+                    } else if !isWhitespace(val) {
+                        fmt.printf("Invalid character following '-'\n")
+                        os.exit(1)
+                    }
+                }
+            }
             case char == '"': { 
                 append(&output, parseString(&tok))    
             }
@@ -163,14 +183,38 @@ parseString :: proc(tok:^Tokenizer) -> Token {
         loc = tok.loc
     }
     startIdx := tok.i + 1
+
+    sb : strings.Builder
     // Eat "
     for hasNext(tok) {
         switch val, _ := next(tok); val {
             case '"':{
                 // End string
-                token.value = tok.text[startIdx:tok.i]
+                strings.write_string(&sb, tok.text[startIdx:tok.i])
+                token.value = strings.clone(strings.to_string(sb))
                 next(tok)
                 return token
+            }
+            case '\\': {
+                escapeVal, ok := next(tok)
+                if !ok {
+                    printLoc(token.loc)
+                    fmt.printf("Reached end of input inside string escape\n")
+                    os.exit(1)
+                }
+                strings.write_string(&sb, tok.text[startIdx:tok.i - 1])
+                startIdx = tok.i + 1
+                switch escapeVal {
+                    case 'r': strings.write_byte(&sb, '\r')
+                    case 'n': strings.write_byte(&sb, '\n')
+                    case 't': strings.write_byte(&sb, '\t')
+                    case '"': strings.write_byte(&sb, '"')
+                    case '0': strings.write_byte(&sb, 0)
+                    case: {
+                        fmt.printf("Invalid escape character of '%c'\n", escapeVal)
+                        os.exit(1)
+                    }
+                }
             }
             case: {
                 // Do nothing
@@ -243,6 +287,10 @@ requireNext :: proc(tok:^Tokenizer, cb : proc(u8) -> bool) {
 
 curT :: proc(tok:^Tokenizer) -> u8 {
     return tok.text[tok.i]
+}
+peek :: proc(tok:^Tokenizer) -> (u8, bool) {
+    if tok.i + 1 >= len(tok.text) do return 0, false
+    return tok.text[tok.i + 1], true
 }
 
 // Peek & Consume

@@ -35,6 +35,7 @@ main :: proc() {
     tokenizer.printTokens(tokens[:])
     // Convert to AST
     AST := ast.resolveTokens(tokens[:])
+    // AST = ast.optimizeAST(AST)
     ast.printAST(AST[:])
 
 
