@@ -13,14 +13,16 @@ SYS_EXIT :: 60
 SYS_WRITE :: 1
 
 ASTState :: struct {
-
+    macros:map[string]Macro
 }
 
 AST :: union #no_nil {
     ^PushLiteral,
     ^UnaryOp,
     ^BinOp,
+    ^Syscall0,
     ^Syscall1,
+    ^Syscall2,
     ^Syscall3,
     ^Drop,
 }
@@ -60,11 +62,18 @@ PushLiteral :: union {
     // Strings should push the label, then the length
     string,
 }
+Syscall0 :: struct {
+    call: AST,
+}
 Syscall1 :: struct {
     call: AST,
-    value: AST,
+    arg1: AST,
 }
-// Used for SYS_WRITE
+Syscall2 :: struct {
+    call: AST,
+    arg1: AST,
+    arg2: AST,
+}
 Syscall3 :: struct {
     call: AST,
     arg1: AST,
@@ -89,6 +98,10 @@ Variable :: struct {
     // If written back into, then cannot optimize out
     //  and must be put into .bss
     redefined: bool,
+}
+
+Macro :: struct {
+
 }
 
 resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
@@ -129,7 +142,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
             case .Plus: {
                 // Requires 2 things on the stack
                 expectArgs(out, "+", 2, cur.loc)
-                if !applyTransIfValid(types.intrinsics[.Plus]) {
+                if !hasTypes({.Int, .Int}) {
                     fmt.printf("Invalid argument types for op '+'\n")
                     os.exit(1)
                 }
@@ -146,9 +159,18 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 value : ^Syscall1 = new(Syscall1)
                 value.call = new(PushLiteral)
                 value.call.(^PushLiteral) ^= SYS_EXIT
-                value.value = pop(&out)
+                value.arg1 = pop(&out)
                 append(&out, value)
                 // append(&out, new(Drop))
+            }
+            case .Syscall0: {
+                expectArgs(out, "syscall0", 1, cur.loc)
+                expectTypes({.Int})
+                pushType(.Int)
+                value : ^Syscall0 = new(Syscall0)
+                value.call = pop(&out)
+                append(&out, value)
+
             }
             case .Syscall1: {
                 expectArgs(out, "syscall1", 2, cur.loc)
@@ -156,7 +178,17 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 pushType(.Int)
                 value : ^Syscall1 = new(Syscall1)
                 value.call = pop(&out)
-                value.value = pop(&out)
+                value.arg1 = pop(&out)
+                append(&out, value)
+            }
+            case .Syscall2: {
+                expectArgs(out, "syscall2", 4, cur.loc)
+                expectTypes({.Int, .Any, .Any})
+                pushType(.Int)
+                value := new(Syscall2)
+                value.call = pop(&out)
+                value.arg1 = pop(&out)
+                value.arg2 = pop(&out)
                 append(&out, value)
             }
             case .Syscall3: { 
@@ -196,12 +228,14 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 value.arg3 = pop(&out)
                 append(&out, value)
             }
+            case .Gt: { assert(false, "TODO") }
             case .If: { assert(false, "TODO") }
             case .Eq: { assert(false, "TODO") }
             case .End: { assert(false, "TODO") }
             case .Let: { assert(false, "TODO") }
             case .Bang: { assert(false, "TODO") }
             case .Dash: { assert(false, "TODO") }
+            case .Colon: { assert(false, "TODO") }
             case .Ident: { assert(false, "TODO") }
             case .OParen: {
                 // Check for type casting
@@ -268,20 +302,35 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             for i in 0..<indent do strings.write_byte(sb, ' ')
             strings.write_string(sb, "}\n")
         }
+        case ^Syscall0: {
+            strings.write_string(sb, "syscall {\n")
+            printASTHelper(ty.call, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
+            strings.write_string(sb, "}\n")
+
+        }
         case ^Syscall1: {
-            strings.write_string(sb, "syscall ")
-            strings.write_string(sb, " {\n")
+            strings.write_string(sb, "syscall {\n")
             printASTHelper(ty.call, sb, true, indent + 1)
-            printASTHelper(ty.value, sb, false, indent + 1)
+            printASTHelper(ty.arg1, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
+            strings.write_string(sb, "}\n")
+        }
+        case ^Syscall2: {
+            strings.write_string(sb, "syscall {\n")
+            printASTHelper(ty.call, sb, true, indent + 1)
+            printASTHelper(ty.arg1, sb, true, indent + 1)
+            printASTHelper(ty.arg2, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
             strings.write_string(sb, "}\n")
         }
         case ^Syscall3: {
-            strings.write_string(sb, "syscall ")
-            strings.write_string(sb, " {\n")
+            strings.write_string(sb, "syscall {\n")
             printASTHelper(ty.call, sb, true, indent + 1)
             printASTHelper(ty.arg1, sb, true, indent + 1)
             printASTHelper(ty.arg2, sb, true, indent + 1)
             printASTHelper(ty.arg3, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
             strings.write_string(sb, "}\n")
         }
         case ^Drop: {

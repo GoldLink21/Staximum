@@ -76,14 +76,32 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         case ^UnaryOp: {
             assert(false, "TODO\n")
         }
-        case ^Syscall1: {
-            astIntToRegister2(sb, ctx,
-                &ty.value, "rdi", 
+        case ^Syscall0: {
+            astIntToRegister(sb, ctx,
                 &ty.call, "rax")
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
+        case ^Syscall1: {
+            astIntToRegister2(sb, ctx,
+                &ty.arg1, "rdi", 
+                &ty.call, "rax")
+            nasm(sb, "syscall")
+            pushReg(sb, "rax")
+        }
+        case ^Syscall2: {
+            // TODO: Optimize later using shortcuts
+            generateNasmFromASTHelp(sb, ctx, &ty.arg2)
+            generateNasmFromASTHelp(sb, ctx, &ty.arg1)
+            generateNasmFromASTHelp(sb, ctx, &ty.call)
+            popReg(sb, "rdi")
+            popReg(sb, "rsi")
+            popReg(sb, "rdx")
+            nasm(sb, "syscall")
+            pushReg(sb, "rax")
+        }
         case ^Syscall3: {
+            // TODO: Optimize later using shortcuts
             generateNasmFromASTHelp(sb, ctx, &ty.arg3)
             generateNasmFromASTHelp(sb, ctx, &ty.arg2)
             generateNasmFromASTHelp(sb, ctx, &ty.arg1)

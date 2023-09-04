@@ -11,6 +11,7 @@ TokenType :: enum {
     // CString,
     If,
     Eq,
+    Gt,
     Let,
     End,
     Exit,
@@ -19,12 +20,13 @@ TokenType :: enum {
     Bang,
     Drop,
     Print,
+    Colon,
     Macro,
     OParen,
     CParen,
-    // Syscall0,
+    Syscall0,
     Syscall1,
-    // Syscall2,
+    Syscall2,
     Syscall3,
     // Syscall4,
     // Syscall5,
@@ -43,12 +45,14 @@ IdentifierTokens : map[string]TokenType = {
     "syscall3" = .Syscall3,
 }
 SymbolTokens : map[u8]TokenType = {
+    '>' = .Gt,
+    '=' = .Eq,
     '-' = .Dash,
     '+' = .Plus,
-    '=' = .Eq,
+    '!' = .Bang,
+    ':' = .Colon,
     '(' = .OParen,
     ')' = .CParen,
-    '!' = .Bang,
 }
 
 
@@ -69,6 +73,8 @@ printToken :: proc(using token:Token) {
         case .StringLit:fmt.printf("<String \"%s\">", value.(string))
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
         case .Eq:       fmt.printf("<=>")
+        case .Gt:       fmt.printf("<>>")
+        case .Colon:    fmt.printf("<:>")
         case .Plus:     fmt.printf("<+>")
         case .Dash:     fmt.printf("<->")
         case .OParen:   fmt.printf("<(>")
@@ -81,9 +87,9 @@ printToken :: proc(using token:Token) {
         case .Exit:     fmt.printf("<Exit>")
         case .Print:    fmt.printf("<Print>")
         case .Macro:    fmt.printf("<Macro>")
-        // case .Syscall0: fmt.printf("<Syscall0>")
+        case .Syscall0: fmt.printf("<Syscall0>")
         case .Syscall1: fmt.printf("<Syscall1>")
-        // case .Syscall2: fmt.printf("<Syscall2>")
+        case .Syscall2: fmt.printf("<Syscall2>")
         case .Syscall3: fmt.printf("<Syscall3>")
         // case .Syscall4: fmt.printf("<Syscall4>")
         // case .Syscall5: fmt.printf("<Syscall5>")

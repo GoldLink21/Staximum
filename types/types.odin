@@ -25,29 +25,3 @@ TypeStrings : map[Type]string = {
     .String = "string",
     .CString = "cstring",
 }
-
-// Intrinsic procedures. Contains overridden type ios
-intrinsics : map[tokenizer.TokenType][]Intrinsic = {
-    .Exit = {{ {.Int}, {} }},
-    .Plus = {
-        { {.Int,   .Int},   {.Int  } },
-        { {.Float, .Float}, {.Float} },
-        // Should convert to needing explicit casting
-        // { {.Float, .Int},   {.Float} },
-        // { {.Int,   .Float}, {.Float} },
-    },
-    .Dash = {
-        { {.Int,   .Int},   {.Int  } },
-        { {.Float, .Float}, {.Float} },
-        // Need explicit casting
-        // { {.Float, .Int},   {.Float} },
-        // { {.Int,   .Float}, {.Float} },
-    },
-    .Eq = {
-        { {.Int,   .Int},   {.Bool} },
-        { {.Float, .Float}, {.Bool} },
-    },
-    .Syscall1 = {{{.Int, .Any}, {.Any} } },
-    .Syscall3 = {{{.Int, .Any, .Any, .Any}, {.Any} } }
-
-}

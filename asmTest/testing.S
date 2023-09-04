@@ -18,9 +18,11 @@ _start:
    mov rax,1 ; SYS_WRITE
    syscall
    
-
+   mov rax, 60
+   mov rdi, 0
+   syscall
 
    section .data
    ; This is where constant strings and expressions can go
-str: db 'Hello',10,
+str: db 'Hello',10
 len: equ $-str

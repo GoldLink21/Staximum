@@ -1,6 +1,8 @@
 # Staximum Language
 
-A [Stack based programming language](https://en.wikipedia.org/wiki/Stack-oriented_programming) intended mostly for programming practice. File extensions is .stax   
+A [Stack based programming language](https://en.wikipedia.org/wiki/Stack-oriented_programming) intended mostly for programming practice. File extensions is .stax
+
+Currently written in [Odin](https://github.com/odin-lang/Odin) with hopes of eventually self hosting the language
 
 ## General Info
 

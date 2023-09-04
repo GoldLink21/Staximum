@@ -44,10 +44,19 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
         case ^UnaryOp: {
             return optimizeASTHelp(&type.value)
         }
+        case ^Syscall0: {
+            return optimizeASTHelp(&type.call)
+        }
         case ^Syscall1: {
             return optimizeASTHelp(&type.call) ||
-                optimizeASTHelp(&type.value)
+                optimizeASTHelp(&type.arg1)
 
+        }
+        case ^Syscall2: {
+            return optimizeASTHelp(&type.call) ||
+                optimizeASTHelp(&type.arg1) ||
+                optimizeASTHelp(&type.arg2)
+                
         }
         case ^Syscall3: {
             return optimizeASTHelp(&type.call) ||
