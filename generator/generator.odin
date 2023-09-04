@@ -31,6 +31,7 @@ generateNasmFromAST :: proc(as : []ast.AST, outFile:string) {
     strings.write_string(&sb, "\n   ; Safe exit if it makes it to the end\n   mov rax, 60\n   mov rdi, 0\n   syscall\n")
     generateDataSection(&sb, &ctx)
     
+    generateBSSSection(&sb, &ctx)
     os.write_string(fd, strings.to_string(sb))
 }
 
@@ -230,7 +231,7 @@ escapeStringToASM :: proc(sb:^strings.Builder,value:string) {
                 lastEscaped = true
             }
             case: {
-                if lastEscaped {
+                if lastEscaped || i == 0 {
                     strings.write_byte(sb, '\'')
                     lastEscaped = false
                 }
