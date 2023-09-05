@@ -11,6 +11,8 @@ import "core:strings"
 ASMContext :: struct {
     // Maps string value to label name
     stringLits : map[string]string,
+    // Float labels
+    floatLits : map[f64]string,
 }
 
 generateNasmFromAST :: proc(as : []ast.AST, outFile:string) {
@@ -35,41 +37,54 @@ generateNasmFromAST :: proc(as : []ast.AST, outFile:string) {
     os.write_string(fd, strings.to_string(sb))
 }
 
+// Takes a string value and generates a label for it if one doen't already exist
+getStringLabel :: proc(ctx:^ASMContext, str:string) -> string {
+    if str not_in ctx.stringLits {
+        // Need to generate
+        ctx.stringLits[str] = fmt.aprintf("stringLit_%d", len(ctx.stringLits))
+    }
+    return ctx.stringLits[str]
+}
+getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
+    if flt not_in ctx.floatLits {
+        ctx.floatLits[flt] = fmt.aprintf("floatLit_%d", len(ctx.floatLits))
+    }
+    return ctx.floatLits[flt]
+}
+
 generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST) {
     using ast
     switch ty in as {
         case ^PushLiteral: {
             switch litType in ty {
-                case bool, int: {
-                    strings.write_string(sb, "   push ")
-                    strings.write_int(sb, ty.(int))
-                    strings.write_string(sb, "\n")
+                case int: {
+                    fmt.sbprintf(sb, "   push %d\n", litType)
+                }
+                case f64: {
+                    assert(false, "TODO")
+                }
+                case bool: {
+                    fmt.sbprintf(sb, "   push %d\n", int(litType))
                 }
                 case string: {
-                    if litType not_in ctx.stringLits {
-                        // Need to generate
-                        ctx.stringLits[litType] = fmt.aprintf("stringLit_%d", len(ctx.stringLits))
-                    }
-                    // Reference
-                    pushReg(sb, ctx.stringLits[litType])
+                    pushReg(sb, getStringLabel(ctx, litType))
                 }
             }
-            
         }
 
         case ^BinOp:{
-            astIntToRegister2(sb, ctx,
+            shortcutLits(sb, ctx,
                 &ty.lhs, "rax",
                 &ty.rhs, "rbx")
             switch ty.op {
                 case .Plus: {
                     nasm(sb, "add rax, rbx")
                 }
+                case .Minus: {
+                    nasm(sb, "sub rax, rbx")
+                }
                 case .Eq: {
-                    astIntToRegister2(sb, ctx,
-                        &ty.lhs, "eax",
-                        &ty.rhs, "ebx")
-                    nasm(sb, "cmp eax, ebx")
+                    nasm(sb, "cmp rax, rbx")
                 }
             }
             nasm(sb, "push rax")
@@ -78,13 +93,13 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             assert(false, "TODO\n")
         }
         case ^Syscall0: {
-            astIntToRegister(sb, ctx,
+            shortcutLit(sb, ctx,
                 &ty.call, "rax")
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
         case ^Syscall1: {
-            astIntToRegister2(sb, ctx,
+            shortcutLits(sb, ctx,
                 &ty.arg1, "rdi", 
                 &ty.call, "rax")
             nasm(sb, "syscall")
@@ -92,25 +107,19 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         }
         case ^Syscall2: {
             // TODO: Optimize later using shortcuts
-            generateNasmFromASTHelp(sb, ctx, &ty.arg2)
-            generateNasmFromASTHelp(sb, ctx, &ty.arg1)
-            generateNasmFromASTHelp(sb, ctx, &ty.call)
-            popReg(sb, "rdi")
-            popReg(sb, "rsi")
-            popReg(sb, "rdx")
+            shortcutAllLiterals(sb, ctx, 
+                {&ty.call, "rax"},
+                {&ty.arg1, "rdi"},
+                {&ty.arg2, "rsi"})
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
         case ^Syscall3: {
-            // TODO: Optimize later using shortcuts
-            generateNasmFromASTHelp(sb, ctx, &ty.arg3)
-            generateNasmFromASTHelp(sb, ctx, &ty.arg2)
-            generateNasmFromASTHelp(sb, ctx, &ty.arg1)
-            generateNasmFromASTHelp(sb, ctx, &ty.call)
-            popReg(sb, "rax")
-            popReg(sb, "rdi")
-            popReg(sb, "rsi")
-            popReg(sb, "rdx")
+            shortcutAllLiterals(sb, ctx, 
+                {&ty.call, "rax"},
+                {&ty.arg1, "rdi"},
+                {&ty.arg2, "rsi"},
+                {&ty.arg3, "rdx"})
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
@@ -121,46 +130,56 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
     }
 }
 
-// Gets an int onto a register from AST
-astIntToRegister :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:string) -> bool {
-    if lit1, isLit := as.(^ast.PushLiteral); isLit {
-        if val1, isInt := lit1.(int); isInt {
-            loadRegWithInt(sb, reg, val1)
-            return true
+loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^ast.PushLiteral) {
+    switch type in lit {
+        case int: {
+            loadRegWithInt(sb, reg, type)
         }
+        case string: {
+            loadRegWithLabel(sb, reg, getStringLabel(ctx, type))
+        }
+        case bool: {
+            loadRegWithInt(sb, reg, type ? 1 : 0)
+        }
+        case f64: {
+            fmt.sbprintf(sb, "   movsd %s, qword [%s]\n", 
+                reg, getFloatLabel(ctx, type))
+        }
+    }
+}
+
+// Gets an int onto a register from AST
+shortcutLit :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:string) -> bool {
+    if lit1, isLit := as.(^ast.PushLiteral); isLit {
+        loadRegWithLit(sb, ctx, reg, lit1)
+        return true
     }
     generateNasmFromASTHelp(sb, ctx, as)
     popReg(sb, reg)
     return false
 }
 
-getLitInt :: proc(as: ^ast.AST) -> (int, bool) {
-    lit, isLit := as.(^ast.PushLiteral)
-    if !isLit do return 0, false
-    return lit.(int)
-}
-
 // Gets two ints into registers by either immediate value or generating on the stack
-astIntToRegister2 :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:string, ast2: ^ast.AST, reg2:string) {
-    lit1, isLit1 := getLitInt(ast1)
-    lit2, isLit2 := getLitInt(ast2)
+shortcutLits :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:string, ast2: ^ast.AST, reg2:string) {
+    lit1, isLit1 := ast1.(^ast.PushLiteral)
+    lit2, isLit2 := ast2.(^ast.PushLiteral)
     if isLit1 {
         if isLit2 {
             // Load both immediately
-            loadRegWithInt(sb, reg1, lit1)
-            loadRegWithInt(sb, reg2, lit2)
+            loadRegWithLit(sb, ctx, reg1, lit1)
+            loadRegWithLit(sb, ctx, reg2, lit2)
         } else {
             // Generate second then pop second and load first 
             generateNasmFromASTHelp(sb, ctx, ast2)
             popReg(sb, reg2)
-            loadRegWithInt(sb, reg1, lit1)
+            loadRegWithLit(sb, ctx, reg1, lit1)
         }
     } else {
         if isLit2 {
             // Generate first then pop first and load second 
             generateNasmFromASTHelp(sb, ctx, ast1)
             popReg(sb, reg1)
-            loadRegWithInt(sb, reg2, lit2)
+            loadRegWithLit(sb, ctx, reg2, lit2)
         } else {
             // Generate both
             generateNasmFromASTHelp(sb, ctx, ast1)
@@ -170,6 +189,50 @@ astIntToRegister2 :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, 
             popReg(sb, reg1)
         }
     }
+}
+
+// Loads many registers with immediate values if possible
+shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{ast:^ast.AST,reg:string}) {
+    // Values that can be loaded directly are done after
+    indiciesForLoad := make([dynamic]int)
+    defer delete(indiciesForLoad)
+    for asReg, i in rest {
+        _, isLiteral := asReg.ast.(^ast.PushLiteral)
+        if isLiteral {
+            // Watch ones that can be immediately loaded after
+            append(&indiciesForLoad, i)
+        } else {
+            // Pushes values that aren't immediately literals
+            generateNasmFromASTHelp(sb, ctx, asReg.ast)
+        }
+    }
+    loadIndex := 0
+    for i in 0..<len(rest) {
+        // In bounds and needs indexing
+        if loadIndex < len(indiciesForLoad) && indiciesForLoad[loadIndex] == i {
+            // Should be safe to do
+            lit := rest[i].ast.(^ast.PushLiteral)
+            loadRegWithLit(sb, ctx, rest[i].reg, lit)
+            // switch type in lit {
+            //     case int: {
+            //         loadRegWithInt(sb, rest[i].reg, type)
+            //     }
+            //     case string: {
+            //         loadRegWithLabel(sb, rest[i].reg, getStringLabel(ctx, type))
+            //     }
+            //     case bool: {
+            //         loadRegWithInt(sb, rest[i].reg, type ? 1 : 0)
+            //     }
+            //     case f64: {
+            //         fmt.sbprintf(sb, "   movsd %s, qword [%s]\n", rest[i].reg, getFloatLabel(ctx, type))
+            //     }
+            // }
+            loadIndex += 1
+        } else {
+            popReg(sb, rest[i].reg)
+        }
+    }
+
 }
 
 // Adds an indented instruction with a newline
@@ -184,16 +247,31 @@ loadRegWithInt :: proc(sb: ^strings.Builder, reg:string, value:int) {
 loadRegWithLabel :: proc(sb: ^strings.Builder, reg:string, label:string) {
     fmt.sbprintf(sb, "   mov %s, %s\n", reg, label)
 }
+
 // Loads value into a register
 loadReg :: proc{loadRegWithInt, loadRegWithLabel}
 
 // Pops value into register
-popReg :: proc(sb: ^strings.Builder, reg:string) {
+popReg :: proc(sb: ^strings.Builder, reg:string, isFloat := false) {
+    if isFloat {
+        assert(false, "TODO")
+    }
     fmt.sbprintf(sb, "   pop %s\n", reg)
 }
 
 // Pushes value in register
-pushReg :: proc(sb: ^strings.Builder, reg:string) {
+pushReg :: proc(sb: ^strings.Builder, reg:string, isFloat := false) {
+    if isFloat {
+        assert(false, "TODO")
+    }
+    /*
+        sub rsp,0x10 // 0x10 = 16 of course.
+        // And then we just dump our SSE register onto the stack.
+        movdqu [rsp],xmm0
+        // Do what needs to be done with xmm0...
+        movdqu xmm0,[rsp]
+        add rsp,0x10
+    */
     fmt.sbprintf(sb, "   push %s\n", reg)
 }
 
@@ -205,7 +283,7 @@ generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
     for k, v in ctx.stringLits {
         strings.write_string(sb, v)
         strings.write_string(sb, ": db ")
-        escapeStringToASM(sb, k)
+        escapeStringToNASM(sb, k)
         strings.write_byte(sb, '\n')
         // strings.write_string(sb, k)
         // strings.write_string(sb, "\',10\n")
@@ -217,12 +295,13 @@ generateBSSSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
     
 }
 
-escapeStringToASM :: proc(sb:^strings.Builder,value:string) {
+// Turns string  literal into what the nasm asm expects
+escapeStringToNASM :: proc(sb:^strings.Builder,value:string) {
     lastEscaped := false
     for c,i in value {
         if lastEscaped do strings.write_byte(sb, ',')
         switch c {
-            case '\r', '\n', '\t', 0, '\'': {
+            case '\r', '\n', '\t', 0, '\'', '\\': {
                 if !lastEscaped && i != 0 {
                     // Need to close previous string
                     strings.write_string(sb, "',")

@@ -5,6 +5,7 @@ import "core:fmt"
 
 optimizeAST :: proc(input:[dynamic]AST) -> ([dynamic]AST) {
     for changedSomething := true; changedSomething; {
+        // Run again if something was optimized
         changedSomething = false
         for _,idx in input {
             changedSomething ||= optimizeASTHelp(&input[idx])
@@ -13,7 +14,6 @@ optimizeAST :: proc(input:[dynamic]AST) -> ([dynamic]AST) {
     return input
 }
 
-// TODO: Currently broken
 optimizeASTHelp :: proc(ast:^AST) -> (bool) {
     changedSomething := false
     switch type in ast {
@@ -31,6 +31,18 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
                         free(type)
                         pl := new(PushLiteral)
                         pl ^= v1 + v2
+                        ast ^= pl
+                        return true
+                    }
+                }
+                case .Minus: {
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(PushLiteral)
+                        pl ^= v1 - v2
                         ast ^= pl
                         return true
                     }

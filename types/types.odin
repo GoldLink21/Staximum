@@ -1,4 +1,4 @@
-// Handles watching types going throughout the program
+// All types that the language can handle
 package types
 
 import "core:fmt"

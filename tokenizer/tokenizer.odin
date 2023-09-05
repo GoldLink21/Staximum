@@ -13,7 +13,6 @@ printLoc :: proc(loc:Location){
     fmt.printf("%s %d:%d ", loc.file, loc.line + 1, loc.col)
 }
 
-
 Token :: struct {
     type : TokenType,
     loc: Location,
@@ -26,6 +25,7 @@ Tokenizer :: struct {
     i: int
 }
 
+// Tokenize a string. File is used solely for debugging
 tokenize :: proc(content : string, file: string="") -> [dynamic]Token {
     tok : Tokenizer = {
         text=content[:],
@@ -48,6 +48,7 @@ tokenize :: proc(content : string, file: string="") -> [dynamic]Token {
                 append(&output, parseNumber(&tok))
             }
             case char == '-': {
+                // TODO: Add Dash symbol if no number after
                 // First check for negative numbers
                 if hasNext(&tok) {
                     if val, _ := peek(&tok); isNum(val) {
@@ -62,11 +63,13 @@ tokenize :: proc(content : string, file: string="") -> [dynamic]Token {
                             }
                         }
                         append(&output, token)
-                    } else if !isWhitespace(val) {
-                        fmt.printf("Invalid character following '-'\n")
+                        continue
+                    } else if !isWhitespace(val) && val != 0 {
+                        fmt.printf("Invalid character of '%d' following '-'\n", val)
                         os.exit(1)
-                    }
+                    }                    
                 }
+                append(&output, Token{.Dash,tok.loc,nil})
             }
             case char == '"': { 
                 append(&output, parseString(&tok))    
@@ -124,6 +127,7 @@ parseIdent :: proc(tok:^Tokenizer) -> Token {
     } else {
         token.value = text
     }
+    tok.i -= 1
     return token
 }
 
@@ -208,8 +212,8 @@ parseString :: proc(tok:^Tokenizer) -> Token {
                     case 'r': strings.write_byte(&sb, '\r')
                     case 'n': strings.write_byte(&sb, '\n')
                     case 't': strings.write_byte(&sb, '\t')
-                    case '"': strings.write_byte(&sb, '"')
                     case '0': strings.write_byte(&sb, 0)
+                    case '"', '\\': strings.write_byte(&sb, escapeVal)
                     case: {
                         fmt.printf("Invalid escape character of '%c'\n", escapeVal)
                         os.exit(1)

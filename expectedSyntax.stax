@@ -2,6 +2,13 @@
 //  an InputTypes and returns an OutputTypes
 macro Name : InputTypes > OutputTypes {
     InnerTokens
+    1 2 + 3 = if {
+
+        // Not sure about else if yet
+    } else {
+
+    }
+
 }
 
 macro stdout > int {1}

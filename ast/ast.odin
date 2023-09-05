@@ -38,6 +38,7 @@ BinOp :: struct {
 // Different possible binary operations
 BinOps :: enum {
     Plus,
+    Minus,
     Eq,
 }
 BinOpsString : map[BinOps]string = {
@@ -59,6 +60,7 @@ UnaryOp :: struct {
 PushLiteral :: union {
     int,
     bool,
+    f64,
     // Strings should push the label, then the length
     string,
 }
@@ -153,6 +155,20 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 value.op = .Plus
                 append(&out, value)
             }
+            case .Dash: { 
+                // Requires 2 things on the stack
+                expectArgs(out, "+", 2, cur.loc)
+                if !hasTypes({.Int, .Int}) {
+                    fmt.printf("Invalid argument types for op '+'\n")
+                    os.exit(1)
+                }
+                // Optimize out simple operations
+                value : ^BinOp = new(BinOp)
+                value.lhs = pop(&out)
+                value.rhs = pop(&out)
+                value.op = .Minus
+                append(&out, value)
+            }
             case .Exit: {
                 expectArgs(out, "exit", 1, cur.loc)
                 expectTypes({.Int})
@@ -234,7 +250,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
             case .End: { assert(false, "TODO") }
             case .Let: { assert(false, "TODO") }
             case .Bang: { assert(false, "TODO") }
-            case .Dash: { assert(false, "TODO") }
+            
             case .Colon: { assert(false, "TODO") }
             case .Ident: { assert(false, "TODO") }
             case .OParen: {
@@ -272,8 +288,7 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
         case ^PushLiteral: {
             switch lit in ty {
                 case int: {
-                    // fmt.printf("%d\n", lit)
-                    strings.write_int(sb, int(lit))
+                    strings.write_int(sb, lit)
                 }
                 case bool: {
                     // bool is basically just an int, right?
@@ -281,6 +296,9 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                 }
                 case string: {
                     strings.write_string(sb, lit)
+                }
+                case f64: {
+                    fmt.sbprintf(sb, "%.4f", lit)
                 }
             }
             if inList do strings.write_byte(sb, ',')
