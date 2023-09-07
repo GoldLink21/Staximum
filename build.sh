@@ -2,7 +2,7 @@
 rm -f out out.o out.S stax
 
 # Control what is happening on build
-GENERATE_ASM=true
+GENERATE_ASM=false
 ASSEMBLE=true
 LINK=true
 RUN=true

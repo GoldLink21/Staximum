@@ -14,6 +14,7 @@ ASSEMBLE     :: #config(ASSEMBLE,    false)
 LINK         :: #config(LINK,        false)
 
 main :: proc() {
+
     // 0 1 2
     if len(os.args) > 3 || len(os.args) < 2  {
         fmt.printf("Invalid usage\n")
@@ -31,13 +32,20 @@ main :: proc() {
         return
     }
     // Tokenize
-    tokens := tokenizer.tokenize(text, os.args[1])
+    tokens, err := tokenizer.tokenize(text, os.args[1])
+    if err != nil {
+        fmt.printf("%s", err.(string))
+        return
+    }
     tokenizer.printTokens(tokens[:])
     // Convert to AST
-    AST := ast.resolveTokens(tokens[:])
+    AST, astErr := ast.resolveTokens(tokens[:])
+    if astErr != nil {
+        fmt.printf("%s", astErr.(string))
+        return
+    }
     // AST = ast.optimizeAST(AST)
     ast.printAST(AST[:])
-
 
     when GENERATE_ASM {
         generator.generateNasmFromAST(AST[:], fmt.tprintf("%s.S", outFile))

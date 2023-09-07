@@ -1,5 +1,6 @@
 package ast
 import "../tokenizer"
+import "../util"
 import "core:fmt"
 import "core:os"
 
@@ -12,7 +13,12 @@ TokWalk :: struct {
 }
 
 curr :: proc(tw : ^TokWalk) -> Token {
+    // if tw.i >= i32(len(tw.tokens)) do return nil
     return tw.tokens[tw.i]
+}
+// If the current token is alright
+curOk :: proc(tw:^TokWalk) -> bool {
+    return tw.i < i32(len(tw.tokens))
 }
 // Shows next token without consume
 peek :: proc(tw:^TokWalk) -> (Token, bool) {
@@ -36,10 +42,9 @@ tryNext :: proc(tw:^TokWalk, type:TokenType) -> bool {
     return false
 }
 // Expects the next token to be a type
-expectNext :: proc(tw:^TokWalk, type:TokenType) {
+expectNext :: proc(tw:^TokWalk, type:TokenType) -> util.ErrorMsg {
     if !tryNext(tw, type) {
-        fmt.printf("Expected type of ")
-        os.exit(1)
+        return fmt.tprintf("Expected a type of '%s' but got '%s' instead\n")
     }
-    return
+    return nil
 }

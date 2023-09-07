@@ -1,9 +1,12 @@
 package tokenizer
 
 import "core:fmt"
+import "../types"
+import "../util"
 
 TokenType :: enum {
-    Ident = 0,
+    Error = 0,
+    Ident,
     IntLit,
     BoolLit,
     StringLit,
@@ -19,11 +22,14 @@ TokenType :: enum {
     Dash,
     Bang,
     Drop,
+    Type,
     Print,
     Colon,
     Macro,
     OParen,
     CParen,
+    OBrace,
+    CBrace,
     Syscall0,
     Syscall1,
     Syscall2,
@@ -41,7 +47,9 @@ IdentifierTokens : map[string]TokenType = {
     "drop" = .Drop,
     "print" = .Print,
     "macro" = .Macro,
+    "syscall0" = .Syscall0,
     "syscall1" = .Syscall1,
+    "syscall2" = .Syscall2,
     "syscall3" = .Syscall3,
 }
 SymbolTokens : map[u8]TokenType = {
@@ -53,6 +61,8 @@ SymbolTokens : map[u8]TokenType = {
     ':' = .Colon,
     '(' = .OParen,
     ')' = .CParen,
+    '{' = .OBrace,
+    '}' = .CBrace,
 }
 
 
@@ -62,16 +72,19 @@ TokenValue :: union {
     int,
     f32,
     bool,
+    types.Type
 }
 
 
 printToken :: proc(using token:Token) {
     switch token.type {
+        case .Error:    fmt.printf("<Error '%s'>", value.(string))
         case .Ident:    fmt.printf("<Ident '%s'>", value.(string))
         case .IntLit:   fmt.printf("<Int '%d'>", value.(int))
         case .FloatLit: fmt.printf("<Float '%f'>", value.(f32))
         case .StringLit:fmt.printf("<String \"%s\">", value.(string))
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
+        case .Type:     fmt.printf("<Type '%s'>", types.TypeToString[value.(types.Type)])
         case .Eq:       fmt.printf("<=>")
         case .Gt:       fmt.printf("<>>")
         case .Colon:    fmt.printf("<:>")
@@ -79,6 +92,8 @@ printToken :: proc(using token:Token) {
         case .Dash:     fmt.printf("<->")
         case .OParen:   fmt.printf("<(>")
         case .CParen:   fmt.printf("<)>")
+        case .OBrace:   fmt.printf("<{{>")
+        case .CBrace:   fmt.printf("<}>")
         case .Bang:     fmt.printf("<!>")
         case .If:       fmt.printf("<If>")
         case .End:      fmt.printf("<End>")
@@ -101,7 +116,7 @@ printToken :: proc(using token:Token) {
 
 printTokens :: proc(tokens: []Token) {
     for token in tokens {
-        printLoc(token.loc)
+        util.printLoc(token.loc)
         printToken(token)
         fmt.printf("\n")
     }

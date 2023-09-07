@@ -213,20 +213,6 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
             // Should be safe to do
             lit := rest[i].ast.(^ast.PushLiteral)
             loadRegWithLit(sb, ctx, rest[i].reg, lit)
-            // switch type in lit {
-            //     case int: {
-            //         loadRegWithInt(sb, rest[i].reg, type)
-            //     }
-            //     case string: {
-            //         loadRegWithLabel(sb, rest[i].reg, getStringLabel(ctx, type))
-            //     }
-            //     case bool: {
-            //         loadRegWithInt(sb, rest[i].reg, type ? 1 : 0)
-            //     }
-            //     case f64: {
-            //         fmt.sbprintf(sb, "   movsd %s, qword [%s]\n", rest[i].reg, getFloatLabel(ctx, type))
-            //     }
-            // }
             loadIndex += 1
         } else {
             popReg(sb, rest[i].reg)

@@ -2,7 +2,6 @@
 package types
 
 import "core:fmt"
-import "../tokenizer"
 
 Intrinsic :: struct {
     inputs:  []Type,
@@ -17,11 +16,19 @@ Type :: enum u8 {
     String,
     CString,
 }
-TypeStrings : map[Type]string = {
+TypeToString : map[Type]string = {
     .Any = "any",
     .Int = "int",
-    .Float = "float",
     .Bool = "bool",
+    .Float = "float",
     .String = "string",
     .CString = "cstring",
+}
+StringToType : map[string]Type = {
+    "any" = .Any,
+    "int" = .Int,
+    "bool" = .Bool,
+    "float" = .Float,
+    "string" = .String,
+    "cstring" = .CString,
 }

@@ -8,6 +8,7 @@ import "core:strings"
 
 import "../tokenizer"
 import "../types"
+import "../util"
 
 SYS_EXIT :: 60
 SYS_WRITE :: 1
@@ -106,15 +107,15 @@ Macro :: struct {
 
 }
 
-resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
-    out := make([dynamic]AST)
+resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.ErrorMsg) {
+    out = make([dynamic]AST)
     variables := make(map[string]Variable)
-    numDrops := 0
-    for i := 0; i < len(tokens); i += 1 {
-        cur := tokens[i]
-
-        // hasNext := i < len(tokens)
+    tw : TokWalk = { tokens, 0 }
+    for cur := curr(&tw); curOk(&tw); cur,_ = next(&tw) {
         switch cur.type {
+            case .Error: {
+                return out, "Error Token found\n"
+            }
             case .IntLit: {
                 value : ^PushLiteral = new(PushLiteral)
                 value ^= cur.value.(int)
@@ -143,10 +144,9 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
             }
             case .Plus: {
                 // Requires 2 things on the stack
-                expectArgs(out, "+", 2, cur.loc)
+                expectArgs(out, "+", 2, cur.loc) or_return
                 if !hasTypes({.Int, .Int}) {
-                    fmt.printf("Invalid argument types for op '+'\n")
-                    os.exit(1)
+                    return out, "Invalid argument types for op '+'\n"
                 }
                 // Optimize out simple operations
                 value : ^BinOp = new(BinOp)
@@ -157,10 +157,9 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
             }
             case .Dash: { 
                 // Requires 2 things on the stack
-                expectArgs(out, "+", 2, cur.loc)
+                expectArgs(out, "+", 2, cur.loc) or_return
                 if !hasTypes({.Int, .Int}) {
-                    fmt.printf("Invalid argument types for op '+'\n")
-                    os.exit(1)
+                    return out, "Invalid argument types for op '-'\n"
                 }
                 // Optimize out simple operations
                 value : ^BinOp = new(BinOp)
@@ -170,7 +169,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 append(&out, value)
             }
             case .Exit: {
-                expectArgs(out, "exit", 1, cur.loc)
+                expectArgs(out, "exit", 1, cur.loc) or_return
                 expectTypes({.Int})
                 value : ^Syscall1 = new(Syscall1)
                 value.call = new(PushLiteral)
@@ -180,7 +179,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 // append(&out, new(Drop))
             }
             case .Syscall0: {
-                expectArgs(out, "syscall0", 1, cur.loc)
+                expectArgs(out, "syscall0", 1, cur.loc) or_return
                 expectTypes({.Int})
                 pushType(.Int)
                 value : ^Syscall0 = new(Syscall0)
@@ -189,7 +188,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
 
             }
             case .Syscall1: {
-                expectArgs(out, "syscall1", 2, cur.loc)
+                expectArgs(out, "syscall1", 2, cur.loc) or_return
                 expectTypes({.Int, .Any})
                 pushType(.Int)
                 value : ^Syscall1 = new(Syscall1)
@@ -198,7 +197,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 append(&out, value)
             }
             case .Syscall2: {
-                expectArgs(out, "syscall2", 4, cur.loc)
+                expectArgs(out, "syscall2", 3, cur.loc) or_return
                 expectTypes({.Int, .Any, .Any})
                 pushType(.Int)
                 value := new(Syscall2)
@@ -208,7 +207,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 append(&out, value)
             }
             case .Syscall3: { 
-                expectArgs(out, "syscall3", 4, cur.loc)
+                expectArgs(out, "syscall3", 4, cur.loc) or_return
                 expectTypes({.Int, .Any, .Any, .Any})
                 pushType(.Int)
                 value := new(Syscall3)
@@ -220,17 +219,16 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 // assert(false, "TODO") 
             }
             case .Drop: {
-                expectArgs(out, "drop", 1, cur.loc)
+                expectArgs(out, "drop", 1, cur.loc) or_return
                 popType()
                 append(&out, new(Drop))
-                // numDrops += 1
             }
             case .Macro: {
-                
+                return out, "TODO"
             }
             case .Print: {
                 // Should this instead become a proc?
-                expectArgs(out, "print", 2, cur.loc)
+                expectArgs(out, "print", 2, cur.loc) or_return
                 expectTypes({.String, .Int})
 
                 value : ^Syscall3 = new(Syscall3)
@@ -244,41 +242,66 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> [dynamic]AST {
                 value.arg3 = pop(&out)
                 append(&out, value)
             }
-            case .Gt: { assert(false, "TODO") }
-            case .If: { assert(false, "TODO") }
-            case .Eq: { assert(false, "TODO") }
-            case .End: { assert(false, "TODO") }
-            case .Let: { assert(false, "TODO") }
-            case .Bang: { assert(false, "TODO") }
-            
-            case .Colon: { assert(false, "TODO") }
-            case .Ident: { assert(false, "TODO") }
+            case .Gt: { 
+                return out, "AST TODO\n"
+            }
+            case .If: { 
+                return out, "AST TODO\n"
+            }
+            case .Eq: {
+                return out, "AST TODO\n"
+            }
+            case .End: { 
+                return out, "AST TODO\n"
+            }
+            case .Let: { 
+                return out, "AST TODO\n"
+            }
+            case .Bang: { 
+                return out, "AST TODO\n"
+            }
+            case .Type: { 
+                return out, "AST TODO\n"
+            }
+            case .Colon: { 
+                return out, "AST TODO\n"
+            }
+            case .Ident: { 
+                return out, "AST TODO\n"
+            }
             case .OParen: {
                 // Check for type casting
-                assert(false, "TODO")
+                if n, ok := peek(&tw); ok && n.type == .Ident {
+
+                }
+                return out, "AST TODO\n"
             }
-            case .CParen: { assert(false, "TODO") }
-            case .FloatLit: { assert(false, "TODO") }
+            case .CParen: { 
+                return out, "AST TODO\n"
+            }
+            case .FloatLit: { 
+                return out, "AST TODO\n"
+            }
+            case .OBrace: {
+                return out, "AST TODO\n"
+            }
+            case .CBrace: {
+                return out, "AST TODO\n"
+            }
         }
-        // Check just in case
-        /*
-        if len(typeStack) != len(out) - numDrops {
-            fmt.printf("WARN: typestack does not match length of output stack\n")
-            for type in typeStack {
-                fmt.print(type)
-                fmt.println()
-            }
-        }*/
     }
-    return out
+    return out, nil
 }
 
-expectArgs :: proc(out : [dynamic]AST, label:string, numArgs:int, loc:tokenizer.Location) {
+expectArgs :: proc(out : [dynamic]AST, label:string, numArgs:int, loc:tokenizer.Location) -> util.ErrorMsg {
     if len(out) < numArgs {
-        tokenizer.printLoc(loc)
-        fmt.printf("%s requries %d argument%s\n", label, numArgs, (numArgs)==1?"":"s")
-        os.exit(1)
+        return util.locStr(loc, 
+            "%s requries %d argument%s", 
+            label, numArgs, 
+            (numArgs)==1?"":"s"
+        )
     }
+    return nil
 }
 
 printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) {
@@ -295,7 +318,9 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                     strings.write_int(sb, int(lit))
                 }
                 case string: {
+                    strings.write_byte(sb, '"')
                     strings.write_string(sb, lit)
+                    strings.write_byte(sb, '"')
                 }
                 case f64: {
                     fmt.sbprintf(sb, "%.4f", lit)
