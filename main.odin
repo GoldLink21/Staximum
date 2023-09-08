@@ -35,20 +35,20 @@ main :: proc() {
     tokens, err := tokenizer.tokenize(text, os.args[1])
     if err != nil {
         fmt.printf("%s", err.(string))
-        return
+        os.exit(1)
     }
     tokenizer.printTokens(tokens[:])
     // Convert to AST
     AST, astErr := ast.resolveTokens(tokens[:])
     if astErr != nil {
         fmt.printf("%s", astErr.(string))
-        return
+        os.exit(1)
     }
-    // AST = ast.optimizeAST(AST)
+    AST = ast.optimizeAST(AST)
     ast.printAST(AST[:])
 
     when GENERATE_ASM {
-        generator.generateNasmFromAST(AST[:], fmt.tprintf("%s.S", outFile))
+        generator.generateNasmToFile(AST[:], fmt.tprintf("%s.S", outFile))
     }
 }
 

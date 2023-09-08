@@ -14,6 +14,7 @@ Token :: struct {
     value: TokenValue 
 }
 
+// Helps handling going from token to token
 Tokenizer :: struct {
     text : string,
     loc: Location,
@@ -22,6 +23,7 @@ Tokenizer :: struct {
 
 // Tokenize a string. File is used solely for debugging
 tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, errMsg:util.ErrorMsg) {
+    // TODO: Fix up the curT, next, curGood naming to be more clear
     tok : Tokenizer = {
         text=content[:],
         loc={ 1,1, file[:] },
@@ -51,8 +53,8 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                 append(&output, token)
             }
             case char == '-': {
-                tok := handleDash(&tok) or_return
-                append(&output, tok)
+                token := handleDash(&tok) or_return
+                append(&output, token)
             }
             case char == '"': {
                 token := parseString(&tok) or_return
@@ -82,6 +84,7 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
     return output, nil
 }
 
+// Handles loose text tokens
 parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     // Start of word
     startIdx := tok.i
@@ -95,6 +98,7 @@ parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     // Handle checking what the token is
     text := tok.text[startIdx:tok.i]
     if text in IdentifierTokens {
+        // Just a string that is a token value
         token.type = IdentifierTokens[text]
     } else if text == "true" {
         token.type = .BoolLit
@@ -109,17 +113,18 @@ parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
         token.value = text
     }
     // Add back next char
-    // tok.i -= 1
+    tok.i -= 1
     // tok.loc.col -= 1
     return token, nil
 }
 
+// Handles numeric tokens
 parseNumber :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     token : Token = {
         type = .IntLit,
         loc  = tok.loc,
     }
-    value : f32 = 0
+    value : f64 = 0
     for curGood(tok) {
         nextChar := curT(tok)
         if !isNum(nextChar) && nextChar != '.' {
@@ -146,24 +151,24 @@ parseNumber :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
                 }
                 next(tok)
             }
-            token.value = value + f32(decimal) / f32(power)
+            token.value = value + f64(decimal) / f64(power)
             return token, nil
         } else {
             // That means its a digit
-            value = (value * 10) + f32(nextChar - '0')
+            value = (value * 10) + f64(nextChar - '0')
         }
     }
     if token.type == .IntLit {
         token.value = int(value)
     } else if token.type == .FloatLit {
-        token.value = f32(value)
+        token.value = f64(value)
     } else {
         assert(false, "BUG: This should not occur")
     }
     return token, nil
 }
 
-// No escaping or anything yet
+// Handles string literals
 parseString :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     token : Token = {
         type = .StringLit,
@@ -212,15 +217,16 @@ parseString :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
         "Reached end of input with no matching '\"'")
 }
 
+// Handle tokens that start with '-'
 handleDash :: proc(tok:^Tokenizer) -> (token:Token, err:util.ErrorMsg) {
     // First check for negative numbers
     if curGood(tok) {
-        if val, _ := peekNext(tok); isNum(val) {
+        if val, _ := peekNext(tok); isNum(val) || val == '.' {
             next(tok)
             token = parseNumber(tok) or_return
             switch type in token.value {
                 case int: { token.value = -1 * type }
-                case f32: { token.value = -1 * type }
+                case f64: { token.value = -1 * type }
                 case bool, string, types.Type: {
                     return token, "BUG: Parsing number but got bool, string, or Type\n"
                 }
@@ -235,26 +241,30 @@ handleDash :: proc(tok:^Tokenizer) -> (token:Token, err:util.ErrorMsg) {
     return Token{.Dash,tok.loc,nil}, nil
 }
 
+// Alpha is A-z and _
 isAlpha :: proc(char:u8) -> bool {
     return char == '_' || 
         (char >= 'A' && char <= 'Z') || 
         (char >= 'a' && char <= 'z') 
 }
+// Num is 0-9
 isNum :: proc(char:u8) -> bool {
     return char >= '0' && char <= '9'
 }
 isAlnum :: proc(char:u8) -> bool {
     return isAlpha(char) || isNum(char)
 }
+// Whitespace is ' ', tab, newline and carridge return
 isWhitespace :: proc(char:u8) -> bool {
     return char == ' ' || char == '\t' || char == '\r' || char == '\n'
 }
 
+// Checks if the current token is ok and is a specific value
 curIs :: proc(tok:^Tokenizer, val:u8) -> bool {
     return curGood(tok) && curT(tok) == val
 }
 
-// Tells if at the end of the input
+// Tells if not at the end of the input
 curGood :: proc(tok:^Tokenizer) -> bool {
     // "xyz" i:2 len:3 => false 
     return tok.i < len(tok.text)
@@ -262,6 +272,7 @@ curGood :: proc(tok:^Tokenizer) -> bool {
 
 expect :: proc(tok:^Tokenizer, char:u8, skipWhitespace:bool = true) -> util.ErrorMsg {
     nextChar, ok := next(tok)
+    // Skip whitespace if that is wanted
     if ok && (isWhitespace(nextChar) && skipWhitespace) {
         // Eat extra whitespace
         for curGood(tok) {
@@ -270,20 +281,23 @@ expect :: proc(tok:^Tokenizer, char:u8, skipWhitespace:bool = true) -> util.Erro
             }
         }
     }
+    // Make sure you are in bounds
     if !ok || !curGood(tok) {
-        return util.locStr(tok.loc, "Expected '%c' but got end of input", char)
+        return util.locStr(tok.loc, 
+            "Expected '%c' but got end of input", char)
     }
     if nextChar != char {
-        util.printLoc(tok.loc)
-        fmt.printf("Expected '%c' but got '%c'\n", char, nextChar)
-        os.exit(1)
+        return util.locStr(tok.loc, 
+            "Expected '%c' but got '%c'\n", char, nextChar)
     }
     return nil
 }
 
+// Look at current element
 curT :: proc(tok:^Tokenizer) -> u8 {
     return tok.text[tok.i]
 }
+// Look at next element
 peekNext :: proc(tok:^Tokenizer) -> (u8, bool) {
     if tok.i + 1 >= len(tok.text) do return 0, false
     return tok.text[tok.i + 1], true

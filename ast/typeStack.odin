@@ -1,11 +1,11 @@
 package ast
 
 import "../types"
+import "../util"
 import "core:fmt"
 import "core:os"
 
 Type :: types.Type
-Intrinsic :: types.Intrinsic
 
 typeStack : [dynamic]Type
 
@@ -16,8 +16,8 @@ handleInOutIfValid :: proc(ins:[]Type, outs:[]Type = {}) -> bool {
     for t in outs do pushType(t)
     return true
 }
-expectTransform :: proc(ins:[]Type, outs:[]Type) {
-    expectTypes(ins)
+expectTransform :: proc(ins:[]Type, outs:[]Type, loc:util.Location) {
+    expectTypes(ins, loc)
     for t in outs do pushType(t)
 }
 
@@ -35,22 +35,6 @@ peekType :: proc() -> Type {
     return typeStack[len(typeStack) - 1]
 }
 
-applyTransIfValid :: proc(inOuts:[]Intrinsic) -> bool {
-    for intrinsic in inOuts {
-        // Has exact possible inputs from many choices
-        if hasTypes(intrinsic.inputs) {
-            // Push output types
-            for i in 0..<len(intrinsic.inputs) {
-                popType()
-            }
-            for out in intrinsic.outputs {
-                pushType(out)
-            }
-            return true
-        }
-    }
-    return false
-}
 
 hasTypes :: proc(types: []Type) -> bool {
     if len(types) == 0 do return true
@@ -62,23 +46,25 @@ hasTypes :: proc(types: []Type) -> bool {
     return true
 }
 
-expectTypes :: proc(types: []Type) {
-    if len(types) == 0 do return
+// Expects types and pops them
+expectTypes :: proc(types: []Type, loc:util.Location) -> util.ErrorMsg {
+    if len(types) == 0 do return nil
     if len(typeStack) < len(types) {
-        fmt.assertf(false, "Expected %d typed values, but got only %d\n", 
+        return util.locStr(loc, 
+            "Expected %d typed values, but got only %d", 
             len(types), len(typeStack))
     }
     for ty in types {
         top := pop(&typeStack)
         if top != ty && ty != .Any {
+            s1, _ := fmt.enum_value_to_string(ty)
+            s2, _ := fmt.enum_value_to_string(top)
             
-            fmt.printf("Expected type of '%s' but got '%s'\n", 
-                fmt.enum_value_to_string(ty), 
-                fmt.enum_value_to_string(top)
-            )
-            os.exit(1)
+            return util.locStr(loc, "Expected type of '%s' but got '%s'\n", 
+                s1, s2)
         }
     }
+    return nil
 }
 
 handleNextToken :: proc() {

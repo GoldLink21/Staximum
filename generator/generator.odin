@@ -15,13 +15,17 @@ ASMContext :: struct {
     floatLits : map[f64]string,
 }
 
-generateNasmFromAST :: proc(as : []ast.AST, outFile:string) {
+generateNasmToFile :: proc(as:[]ast.AST, outFile:string) {
     os.remove(outFile)
     fd, err := os.open(outFile, os.O_CREATE | os.O_WRONLY, 0o777)
     if err == -1 {
         fmt.assertf(false, "Error Opening output assembly")
     }
     defer os.close(fd)
+    os.write_string(fd, generateNasmFromAST(as))
+}
+
+generateNasmFromAST :: proc(as : []ast.AST) -> string {
     sb : strings.Builder
     strings.write_string(&sb, "   section .text\nglobal _start\n_start:\n")
     
@@ -34,7 +38,7 @@ generateNasmFromAST :: proc(as : []ast.AST, outFile:string) {
     generateDataSection(&sb, &ctx)
     
     generateBSSSection(&sb, &ctx)
-    os.write_string(fd, strings.to_string(sb))
+    return strings.to_string(sb)
 }
 
 // Takes a string value and generates a label for it if one doen't already exist

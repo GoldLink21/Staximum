@@ -3,11 +3,6 @@ package types
 
 import "core:fmt"
 
-Intrinsic :: struct {
-    inputs:  []Type,
-    outputs: []Type,
-}
-
 Type :: enum u8 {
     Any,
     Int, 

@@ -54,7 +54,33 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
             return changedSomething
         }
         case ^UnaryOp: {
-            return optimizeASTHelp(&type.value)
+            changedSomething = optimizeASTHelp(&type.value)
+            switch type.op {
+                case .CastFloatToInt: {
+                    // If is a float literal, then convert manually
+                    flLit, isFloat := getInnerLiteralType(type.value, f64)
+                    if isFloat {
+                        free(type)
+                        pl := new(PushLiteral)
+                        pl ^= int(flLit)
+                        ast ^= pl
+                        return true
+                    }
+                }
+
+                case .CastIntToFloat: {
+                    // If is an int literal, then convert manually
+                    intLit, isInt := getInnerLiteralType(type.value, int)
+                    if isInt {
+                        free(type)
+                        pl := new(PushLiteral)
+                        pl ^= f64(intLit)
+                        ast ^= pl
+                        return true
+                    }
+                }
+            }
+            return changedSomething
         }
         case ^Syscall0: {
             return optimizeASTHelp(&type.call)
@@ -87,3 +113,11 @@ getInnerLiteralInt :: proc(ast:AST) -> (int, bool) {
     if !isLit do return 0, false
     return lit.(int)
 }
+
+getInnerLiteralType :: proc(ast:AST, $T:typeid) -> (T, bool) {
+    lit, isLit := ast.(^PushLiteral)
+    if !isLit do return 0, false
+    return lit.(T)
+}
+
+getInnerLiteral :: proc(ast:AST) -> (PushLiteral, bool)

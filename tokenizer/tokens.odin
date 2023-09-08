@@ -4,6 +4,7 @@ import "core:fmt"
 import "../types"
 import "../util"
 
+// All the available tokens
 TokenType :: enum {
     Error = 0,
     Ident,
@@ -39,6 +40,7 @@ TokenType :: enum {
     // Syscall6,
 
 }
+// Converting strings to tokens
 IdentifierTokens : map[string]TokenType = {
     "if" = .If,
     "let" = .Let,
@@ -52,6 +54,7 @@ IdentifierTokens : map[string]TokenType = {
     "syscall2" = .Syscall2,
     "syscall3" = .Syscall3,
 }
+// Single char tokens
 SymbolTokens : map[u8]TokenType = {
     '>' = .Gt,
     '=' = .Eq,
@@ -66,22 +69,23 @@ SymbolTokens : map[u8]TokenType = {
 }
 
 
-
+// Possible Values for a token
 TokenValue :: union {
     string,
     int,
-    f32,
+    f64,
     bool,
+    // Used for casting types
     types.Type
 }
 
-
+// Prints a simple format for each token type
 printToken :: proc(using token:Token) {
     switch token.type {
         case .Error:    fmt.printf("<Error '%s'>", value.(string))
         case .Ident:    fmt.printf("<Ident '%s'>", value.(string))
         case .IntLit:   fmt.printf("<Int '%d'>", value.(int))
-        case .FloatLit: fmt.printf("<Float '%f'>", value.(f32))
+        case .FloatLit: fmt.printf("<Float '%f'>", value.(f64))
         case .StringLit:fmt.printf("<String \"%s\">", value.(string))
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
         case .Type:     fmt.printf("<Type '%s'>", types.TypeToString[value.(types.Type)])
@@ -108,6 +112,7 @@ printToken :: proc(using token:Token) {
         case .Syscall3: fmt.printf("<Syscall3>")
         // case .Syscall4: fmt.printf("<Syscall4>")
         // case .Syscall5: fmt.printf("<Syscall5>")
+        // Syscalls can go up to having 6 inputs
         // case .Syscall6: fmt.printf("<Syscall6>")
 
         // Left without default for compiler complaint on adding more

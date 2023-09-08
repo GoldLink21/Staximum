@@ -14,7 +14,8 @@ SYS_EXIT :: 60
 SYS_WRITE :: 1
 
 ASTState :: struct {
-    macros:map[string]Macro
+    macros:map[string]Macro,
+    // vars: set[string]
 }
 
 AST :: union #no_nil {
@@ -123,6 +124,13 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
                 pushType(.Int)
                 append(&out, value)
             }
+            case .FloatLit: { 
+                value : ^PushLiteral = new(PushLiteral)
+                value ^= cur.value.(f64)
+                
+                pushType(.Float)
+                append(&out, value)
+            }
             case .StringLit: { 
                 // Length
                 length : ^PushLiteral = new(PushLiteral)
@@ -144,52 +152,72 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
             }
             case .Plus: {
                 // Requires 2 things on the stack
-                expectArgs(out, "+", 2, cur.loc) or_return
+                expectArgs(out, "+", {}, cur.loc) or_return
+                // Manual type check
+                if len(typeStack) < 2 {
+                    return out, "Op '+' requires 2 inputs"
+                }
+                // TODO: Add float support
                 if !hasTypes({.Int, .Int}) {
                     return out, "Invalid argument types for op '+'\n"
                 }
+                // Types must match, so can just drop one of type
+                popType()
                 // Optimize out simple operations
                 value : ^BinOp = new(BinOp)
                 value.lhs = pop(&out)
                 value.rhs = pop(&out)
+                // TODO: Consider changing to PlusInt and PlusFloat 
                 value.op = .Plus
                 append(&out, value)
             }
             case .Dash: { 
                 // Requires 2 things on the stack
-                expectArgs(out, "+", 2, cur.loc) or_return
+                expectArgs(out, "-", {}, cur.loc) or_return
+                // Manual type check after
+                if len(typeStack) < 2 {
+                    return out, "Op '-' requires 2 inputs"
+                }
+                // TODO: Add float support
                 if !hasTypes({.Int, .Int}) {
                     return out, "Invalid argument types for op '-'\n"
                 }
+                // Types must match, so can just drop one of type
+                popType()
                 // Optimize out simple operations
                 value : ^BinOp = new(BinOp)
                 value.lhs = pop(&out)
                 value.rhs = pop(&out)
+                // TODO: Consider MinusInt and MinusFloat ops
                 value.op = .Minus
                 append(&out, value)
             }
             case .Exit: {
-                expectArgs(out, "exit", 1, cur.loc) or_return
-                expectTypes({.Int})
+                expectArgs(out, "exit", 
+                    {.Int}, cur.loc) or_return
+                // Break even
+                // popType()
+                // pushType(.Int)
+
                 value : ^Syscall1 = new(Syscall1)
                 value.call = new(PushLiteral)
                 value.call.(^PushLiteral) ^= SYS_EXIT
                 value.arg1 = pop(&out)
                 append(&out, value)
+                // Consider dropping after exit calls cause value will never be used
                 // append(&out, new(Drop))
             }
             case .Syscall0: {
-                expectArgs(out, "syscall0", 1, cur.loc) or_return
-                expectTypes({.Int})
+                expectArgs(out, "syscall0", 
+                    {.Int}, cur.loc) or_return
                 pushType(.Int)
                 value : ^Syscall0 = new(Syscall0)
                 value.call = pop(&out)
                 append(&out, value)
-
             }
             case .Syscall1: {
-                expectArgs(out, "syscall1", 2, cur.loc) or_return
-                expectTypes({.Int, .Any})
+                expectArgs(out, "syscall1", 
+                    {.Int, .Any}, cur.loc) or_return
                 pushType(.Int)
                 value : ^Syscall1 = new(Syscall1)
                 value.call = pop(&out)
@@ -197,8 +225,8 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
                 append(&out, value)
             }
             case .Syscall2: {
-                expectArgs(out, "syscall2", 3, cur.loc) or_return
-                expectTypes({.Int, .Any, .Any})
+                expectArgs(out, "syscall2", 
+                    {.Int, .Any, .Any}, cur.loc) or_return
                 pushType(.Int)
                 value := new(Syscall2)
                 value.call = pop(&out)
@@ -207,8 +235,8 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
                 append(&out, value)
             }
             case .Syscall3: { 
-                expectArgs(out, "syscall3", 4, cur.loc) or_return
-                expectTypes({.Int, .Any, .Any, .Any})
+                expectArgs(out, "syscall3", 
+                    {.Int, .Any, .Any, .Any}, cur.loc) or_return
                 pushType(.Int)
                 value := new(Syscall3)
                 value.call = pop(&out)
@@ -219,7 +247,7 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
                 // assert(false, "TODO") 
             }
             case .Drop: {
-                expectArgs(out, "drop", 1, cur.loc) or_return
+                expectArgs(out, "drop", {}, cur.loc) or_return
                 popType()
                 append(&out, new(Drop))
             }
@@ -228,8 +256,8 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
             }
             case .Print: {
                 // Should this instead become a proc?
-                expectArgs(out, "print", 2, cur.loc) or_return
-                expectTypes({.String, .Int})
+                expectArgs(out, "print", 
+                    {.String, .Int}, cur.loc) or_return
 
                 value : ^Syscall3 = new(Syscall3)
                 value.call = new(PushLiteral)
@@ -243,65 +271,87 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
                 append(&out, value)
             }
             case .Gt: { 
-                return out, "AST TODO\n"
+                return out, "> AST TODO\n"
             }
             case .If: { 
-                return out, "AST TODO\n"
+                return out, "< AST TODO\n"
             }
             case .Eq: {
-                return out, "AST TODO\n"
+                return out, "= AST TODO\n"
             }
             case .End: { 
-                return out, "AST TODO\n"
+                return out, "end AST TODO\n"
             }
             case .Let: { 
-                return out, "AST TODO\n"
+                return out, "let AST TODO\n"
             }
             case .Bang: { 
-                return out, "AST TODO\n"
+                return out, "! AST TODO\n"
             }
             case .Type: { 
-                return out, "AST TODO\n"
+                return out, "(type) AST TODO\n"
             }
             case .Colon: { 
-                return out, "AST TODO\n"
+                return out, ": AST TODO\n"
             }
             case .Ident: { 
-                return out, "AST TODO\n"
+                return out, "Rand Ident AST TODO\n"
             }
             case .OParen: {
                 // Check for type casting
-                if n, ok := peek(&tw); ok && n.type == .Ident {
+                if n, ok := peek(&tw); ok && n.type == .Type {
+                    typeToken, _ := next(&tw)
+                    typeValue := typeToken.value.(types.Type)
+                    expectNext(&tw, .CParen)
+                    // Allow only casting from int to float and float to int for now
 
+                    // Ignore if casting to the same type
+                    if peekType() == typeValue do continue
+                    if peekType() == .Int && typeValue == .Float {
+                        popType()
+                        pushType(.Float)
+                        unop := new(UnaryOp)
+                        unop.op = .CastIntToFloat
+                        unop.value = pop(&out)
+                        append(&out, unop)
+                        continue
+                    } else if peekType() == .Float && typeValue == .Int {
+                        popType()
+                        pushType(.Int)
+                        unop := new(UnaryOp)
+                        unop.op = .CastFloatToInt
+                        unop.value = pop(&out)
+                        append(&out, unop)
+                        continue
+                    }
+                    return out, "Cannot currently cast to and from anything except int and float"
                 }
-                return out, "AST TODO\n"
+                return out, "Invalid character after ("
             }
             case .CParen: { 
-                return out, "AST TODO\n"
-            }
-            case .FloatLit: { 
-                return out, "AST TODO\n"
+                return out, ") AST TODO\n"
             }
             case .OBrace: {
-                return out, "AST TODO\n"
+                return out, "{ AST TODO\n"
             }
             case .CBrace: {
-                return out, "AST TODO\n"
+                return out, "} AST TODO\n"
             }
         }
     }
     return out, nil
 }
 
-expectArgs :: proc(out : [dynamic]AST, label:string, numArgs:int, loc:tokenizer.Location) -> util.ErrorMsg {
-    if len(out) < numArgs {
+// Will eat types passed in
+expectArgs :: proc(out : [dynamic]AST, label:string, types:[]Type, loc:tokenizer.Location) -> util.ErrorMsg {
+    if len(out) < len(types) {
         return util.locStr(loc, 
             "%s requries %d argument%s", 
-            label, numArgs, 
-            (numArgs)==1?"":"s"
+            label, len(types), 
+            (len(types))==1?"":"s"
         )
     }
-    return nil
+    return expectTypes(types, loc)
 }
 
 printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) {
