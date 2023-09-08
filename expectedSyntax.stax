@@ -30,11 +30,11 @@ macro add : int int > int {
         // Requires 1 return value
         1 2 +
     }
-    x print // Should print 3
+    x putd // Should print 3
     // Update value in x
     8 x !
 
-    x print // Should print 8
+    x putd // Should print 8
 
     // Holds top 2 values in stack
     //  as easily accessible

@@ -52,8 +52,8 @@ UnaryOps :: enum {
     CastIntToFloat
 }
 UnaryOpsString : map[UnaryOps]string = {
-    .CastFloatToInt = "(Float)",
-    .CastIntToFloat = "(Int)",
+    .CastFloatToInt = "(Int)",
+    .CastIntToFloat = "(Float)",
 }
 UnaryOp :: struct {
     op: UnaryOps,
@@ -254,9 +254,9 @@ resolveTokens :: proc(tokens:[]tokenizer.Token) -> (out:[dynamic]AST, err:util.E
             case .Macro: {
                 return out, "TODO"
             }
-            case .Print: {
+            case .Puts: {
                 // Should this instead become a proc?
-                expectArgs(out, "print", 
+                expectArgs(out, "puts", 
                     {.String, .Int}, cur.loc) or_return
 
                 value : ^Syscall3 = new(Syscall3)

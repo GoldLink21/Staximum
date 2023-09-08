@@ -24,7 +24,7 @@ TokenType :: enum {
     Bang,
     Drop,
     Type,
-    Print,
+    Puts,
     Colon,
     Macro,
     OParen,
@@ -47,7 +47,7 @@ IdentifierTokens : map[string]TokenType = {
     "end" = .End,
     "exit" = .Exit,
     "drop" = .Drop,
-    "print" = .Print,
+    "puts" = .Puts,
     "macro" = .Macro,
     "syscall0" = .Syscall0,
     "syscall1" = .Syscall1,
@@ -104,7 +104,7 @@ printToken :: proc(using token:Token) {
         case .Let:      fmt.printf("<Let>")
         case .Drop:     fmt.printf("<Drop>")
         case .Exit:     fmt.printf("<Exit>")
-        case .Print:    fmt.printf("<Print>")
+        case .Puts:     fmt.printf("<Puts>")
         case .Macro:    fmt.printf("<Macro>")
         case .Syscall0: fmt.printf("<Syscall0>")
         case .Syscall1: fmt.printf("<Syscall1>")

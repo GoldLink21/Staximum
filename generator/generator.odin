@@ -7,6 +7,8 @@ import "core:os"
 import "core:fmt"
 import "core:strings"
 
+// TODO convert to have string error messages
+
 // Stores the state of the ASM as its generated
 ASMContext :: struct {
     // Maps string value to label name
@@ -308,4 +310,5 @@ escapeStringToNASM :: proc(sb:^strings.Builder,value:string) {
             }
         }
     }
+    if !lastEscaped do strings.write_byte(sb, '\'')
 }
