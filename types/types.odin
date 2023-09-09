@@ -6,6 +6,7 @@ import "core:fmt"
 Type :: enum u8 {
     Any,
     Int, 
+    Ptr,
     Float,
     Bool,
     String,
@@ -14,6 +15,7 @@ Type :: enum u8 {
 TypeToString : map[Type]string = {
     .Any = "any",
     .Int = "int",
+    .Ptr = "ptr",
     .Bool = "bool",
     .Float = "float",
     .String = "string",
@@ -22,6 +24,7 @@ TypeToString : map[Type]string = {
 StringToType : map[string]Type = {
     "any" = .Any,
     "int" = .Int,
+    "ptr" = .Ptr,
     "bool" = .Bool,
     "float" = .Float,
     "string" = .String,

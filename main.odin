@@ -37,14 +37,17 @@ main :: proc() {
         fmt.printf("%s", err.(string))
         os.exit(1)
     }
-    tokenizer.printTokens(tokens[:])
+    // tokenizer.printTokens(tokens[:])
     // Convert to AST
-    AST, astErr := ast.resolveTokens(tokens[:])
+    AST, astState, astErr := ast.resolveTokens(tokens[:])
     if astErr != nil {
+        ast.printASTVars(astState.vars)
+        ast.printAST(AST[:])
         fmt.printf("%s", astErr.(string))
         os.exit(1)
     }
-    AST = ast.optimizeAST(AST)
+    AST = ast.optimizeAST(AST, &astState)
+    ast.printASTVars(astState.vars)
     ast.printAST(AST[:])
 
     when GENERATE_ASM {

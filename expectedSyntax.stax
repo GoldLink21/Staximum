@@ -48,4 +48,6 @@ macro noop {
     // Comment
 }
 
-1 2 add
+proc main {
+
+}

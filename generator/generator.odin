@@ -24,10 +24,10 @@ generateNasmToFile :: proc(as:[]ast.AST, outFile:string) {
         fmt.assertf(false, "Error Opening output assembly")
     }
     defer os.close(fd)
-    os.write_string(fd, generateNasmFromAST(as))
+    os.write_string(fd, generateNasmFromAST(as, nil))
 }
 
-generateNasmFromAST :: proc(as : []ast.AST) -> string {
+generateNasmFromAST :: proc(as : []ast.AST, asmCtx:^ASMContext) -> string {
     sb : strings.Builder
     strings.write_string(&sb, "   section .text\nglobal _start\n_start:\n")
     
@@ -61,7 +61,7 @@ getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
 generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST) {
     using ast
     switch ty in as {
-        case ^PushLiteral: {
+        case ^ASTPushLiteral: {
             switch litType in ty {
                 case int: {
                     fmt.sbprintf(sb, "   push %d\n", litType)
@@ -78,7 +78,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             }
         }
 
-        case ^BinOp:{
+        case ^ASTBinOp:{
             shortcutLits(sb, ctx,
                 &ty.lhs, "rax",
                 &ty.rhs, "rbx")
@@ -95,23 +95,23 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             }
             nasm(sb, "push rax")
         }
-        case ^UnaryOp: {
+        case ^ASTUnaryOp: {
             assert(false, "TODO\n")
         }
-        case ^Syscall0: {
+        case ^ASTSyscall0: {
             shortcutLit(sb, ctx,
                 &ty.call, "rax")
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
-        case ^Syscall1: {
+        case ^ASTSyscall1: {
             shortcutLits(sb, ctx,
                 &ty.arg1, "rdi", 
                 &ty.call, "rax")
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
-        case ^Syscall2: {
+        case ^ASTSyscall2: {
             // TODO: Optimize later using shortcuts
             shortcutAllLiterals(sb, ctx, 
                 {&ty.call, "rax"},
@@ -120,7 +120,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
-        case ^Syscall3: {
+        case ^ASTSyscall3: {
             shortcutAllLiterals(sb, ctx, 
                 {&ty.call, "rax"},
                 {&ty.arg1, "rdi"},
@@ -129,14 +129,21 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             nasm(sb, "syscall")
             pushReg(sb, "rax")
         }
-        case ^Drop: {
+        case ^ASTBlock: {
+            assert(false, "TODO\n")
+        }
+        case ^ASTDrop: {
             // Move the stack pointer back to ignore the value that was there
             nasm(sb, "add rsp,8")
+        }
+        case ^ASTVarRef: {
+            // TODO
+            assert(false, "TODO\n")
         }
     }
 }
 
-loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^ast.PushLiteral) {
+loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^ast.ASTPushLiteral) {
     switch type in lit {
         case int: {
             loadRegWithInt(sb, reg, type)
@@ -156,7 +163,7 @@ loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^as
 
 // Gets an int onto a register from AST
 shortcutLit :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:string) -> bool {
-    if lit1, isLit := as.(^ast.PushLiteral); isLit {
+    if lit1, isLit := as.(^ast.ASTPushLiteral); isLit {
         loadRegWithLit(sb, ctx, reg, lit1)
         return true
     }
@@ -167,8 +174,8 @@ shortcutLit :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:str
 
 // Gets two ints into registers by either immediate value or generating on the stack
 shortcutLits :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:string, ast2: ^ast.AST, reg2:string) {
-    lit1, isLit1 := ast1.(^ast.PushLiteral)
-    lit2, isLit2 := ast2.(^ast.PushLiteral)
+    lit1, isLit1 := ast1.(^ast.ASTPushLiteral)
+    lit2, isLit2 := ast2.(^ast.ASTPushLiteral)
     if isLit1 {
         if isLit2 {
             // Load both immediately
@@ -203,7 +210,7 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
     indiciesForLoad := make([dynamic]int)
     defer delete(indiciesForLoad)
     for asReg, i in rest {
-        _, isLiteral := asReg.ast.(^ast.PushLiteral)
+        _, isLiteral := asReg.ast.(^ast.ASTPushLiteral)
         if isLiteral {
             // Watch ones that can be immediately loaded after
             append(&indiciesForLoad, i)
@@ -217,7 +224,7 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
         // In bounds and needs indexing
         if loadIndex < len(indiciesForLoad) && indiciesForLoad[loadIndex] == i {
             // Should be safe to do
-            lit := rest[i].ast.(^ast.PushLiteral)
+            lit := rest[i].ast.(^ast.ASTPushLiteral)
             loadRegWithLit(sb, ctx, rest[i].reg, lit)
             loadIndex += 1
         } else {

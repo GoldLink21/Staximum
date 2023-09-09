@@ -4,3 +4,5 @@ stax
 Staximum
 out
 input.stax
+asmTest/
+quickTest.sh

@@ -3,25 +3,25 @@ package ast
 import "core:fmt"
 
 
-optimizeAST :: proc(input:[dynamic]AST) -> ([dynamic]AST) {
+optimizeAST :: proc(input:[dynamic]AST, state:^ASTState) -> ([dynamic]AST) {
     for changedSomething := true; changedSomething; {
         // Run again if something was optimized
         changedSomething = false
         for _,idx in input {
-            changedSomething ||= optimizeASTHelp(&input[idx])
+            changedSomething ||= optimizeASTHelp(&input[idx], state)
         }
     }
     return input
 }
 
-optimizeASTHelp :: proc(ast:^AST) -> (bool) {
+optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
     changedSomething := false
     switch type in ast {
-        case ^BinOp: {
+        case ^ASTBinOp: {
             // Optimize inner parts
             changedSomething = 
-                optimizeASTHelp(&type.lhs) ||
-                optimizeASTHelp(&type.rhs)
+                optimizeASTHelp(&type.lhs, state) ||
+                optimizeASTHelp(&type.rhs, state)
             switch type.op {
                 case .Plus: {
                     v1, isInt1 := getInnerLiteralInt(type.lhs)
@@ -29,7 +29,7 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
                     if isInt1 && isInt2 {
                         // Cleanup
                         free(type)
-                        pl := new(PushLiteral)
+                        pl := new(ASTPushLiteral)
                         pl ^= v1 + v2
                         ast ^= pl
                         return true
@@ -41,7 +41,7 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
                     if isInt1 && isInt2 {
                         // Cleanup
                         free(type)
-                        pl := new(PushLiteral)
+                        pl := new(ASTPushLiteral)
                         pl ^= v1 - v2
                         ast ^= pl
                         return true
@@ -51,17 +51,16 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
                     
                 }
             }
-            return changedSomething
         }
-        case ^UnaryOp: {
-            changedSomething = optimizeASTHelp(&type.value)
+        case ^ASTUnaryOp: {
+            changedSomething = optimizeASTHelp(&type.value, state)
             switch type.op {
                 case .CastFloatToInt: {
                     // If is a float literal, then convert manually
                     flLit, isFloat := getInnerLiteralType(type.value, f64)
                     if isFloat {
                         free(type)
-                        pl := new(PushLiteral)
+                        pl := new(ASTPushLiteral)
                         pl ^= int(flLit)
                         ast ^= pl
                         return true
@@ -73,51 +72,56 @@ optimizeASTHelp :: proc(ast:^AST) -> (bool) {
                     intLit, isInt := getInnerLiteralType(type.value, int)
                     if isInt {
                         free(type)
-                        pl := new(PushLiteral)
+                        pl := new(ASTPushLiteral)
                         pl ^= f64(intLit)
                         ast ^= pl
                         return true
                     }
                 }
             }
-            return changedSomething
         }
-        case ^Syscall0: {
-            return optimizeASTHelp(&type.call)
+        case ^ASTSyscall0: {
+            return optimizeASTHelp(&type.call, state)
         }
-        case ^Syscall1: {
-            return optimizeASTHelp(&type.call) ||
-                optimizeASTHelp(&type.arg1)
+        case ^ASTSyscall1: {
+            return optimizeASTHelp(&type.call, state) ||
+                optimizeASTHelp(&type.arg1, state)
 
         }
-        case ^Syscall2: {
-            return optimizeASTHelp(&type.call) ||
-                optimizeASTHelp(&type.arg1) ||
-                optimizeASTHelp(&type.arg2)
+        case ^ASTSyscall2: {
+            return optimizeASTHelp(&type.call, state) ||
+                optimizeASTHelp(&type.arg1, state) ||
+                optimizeASTHelp(&type.arg2, state)
                 
         }
-        case ^Syscall3: {
-            return optimizeASTHelp(&type.call) ||
-                optimizeASTHelp(&type.arg1) ||
-                optimizeASTHelp(&type.arg2) ||
-                optimizeASTHelp(&type.arg3)
+        case ^ASTSyscall3: {
+            return optimizeASTHelp(&type.call, state) ||
+                optimizeASTHelp(&type.arg1, state) ||
+                optimizeASTHelp(&type.arg2, state) ||
+                optimizeASTHelp(&type.arg3, state)
+        }
+        case ^ASTBlock: {
+            for &node in type.nodes {
+                changedSomething ||= optimizeASTHelp(&node, state)
+            }
+            // Remove unused vars
         }
         // No optimizations
-        case ^PushLiteral, ^Drop: {}
+        case ^ASTPushLiteral, ^ASTDrop, ^ASTVarRef: {}
     }
-    return false
+    return changedSomething
 }
 
 getInnerLiteralInt :: proc(ast:AST) -> (int, bool) {
-    lit, isLit := ast.(^PushLiteral)
+    lit, isLit := ast.(^ASTPushLiteral)
     if !isLit do return 0, false
     return lit.(int)
 }
 
 getInnerLiteralType :: proc(ast:AST, $T:typeid) -> (T, bool) {
-    lit, isLit := ast.(^PushLiteral)
+    lit, isLit := ast.(^ASTPushLiteral)
     if !isLit do return 0, false
     return lit.(T)
 }
 
-getInnerLiteral :: proc(ast:AST) -> (PushLiteral, bool)
+// getInnerLiteral :: proc(ast:AST) -> (ASTPushLiteral, bool)

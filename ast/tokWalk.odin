@@ -34,17 +34,23 @@ next :: proc(tw: ^TokWalk) -> (Token, bool) {
     return tw.tokens[tw.i], true
 }
 // Check if next is a type and eats it if so
-tryNext :: proc(tw:^TokWalk, type:TokenType) -> bool {
+tryNext :: proc(tw:^TokWalk, type:TokenType) -> (Token, bool) {
     if tok, ok := peek(tw); ok && tok.type == type {
         tw.i += 1
-        return true
+        return curr(tw), true
     }
-    return false
+    return {}, false
 }
 // Expects the next token to be a type
-expectNext :: proc(tw:^TokWalk, type:TokenType) -> util.ErrorMsg {
-    if !tryNext(tw, type) {
-        return fmt.tprintf("Expected a type of '%s' but got '%s' instead\n")
+expectNext :: proc(tw:^TokWalk, type:TokenType) -> (Token, util.ErrorMsg) {
+    tok, ok := tryNext(tw, type);
+    if !ok {
+        expected, _ := fmt.enum_value_to_string(type)
+        got, _ := fmt.enum_value_to_string(tok.type)
+        return tok, util.locStr(tok.loc, 
+            "Expected a token of '%s' but got '%s' instead\n",
+            expected, got
+        )
     }
-    return nil
+    return tok, nil
 }
