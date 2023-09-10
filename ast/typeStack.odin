@@ -7,55 +7,54 @@ import "core:os"
 
 Type :: types.Type
 
-typeStack : [dynamic]Type
 
 
-handleInOutIfValid :: proc(ins:[]Type, outs:[]Type = {}) -> bool {
-    if !hasTypes(ins) do return false
-    for _ in ins do popType()
-    for t in outs do pushType(t)
+handleInOutIfValid :: proc(ts:^[dynamic]Type, ins:[]Type, outs:[]Type = {}) -> bool {
+    if !hasTypes(ts, ins) do return false
+    for _ in ins do popType(ts)
+    for t in outs do pushType(ts, t)
     return true
 }
-expectTransform :: proc(ins:[]Type, outs:[]Type, loc:util.Location) {
-    expectTypes(ins, loc)
-    for t in outs do pushType(t)
+expectTransform :: proc(ts:^[dynamic]Type, ins:[]Type, outs:[]Type, loc:util.Location) {
+    expectTypes(ts, ins, loc)
+    for t in outs do pushType(ts, t)
 }
 
 
-pushType :: proc(ty : Type) {
-    append(&typeStack, ty)
+pushType :: proc(ts:^[dynamic]Type, ty : Type) {
+    append(ts, ty)
 }
 
-popType :: proc() -> (Type, bool) {
-    if len(typeStack) == 0 do return nil, false
-    return pop(&typeStack), true
+popType :: proc(ts:^[dynamic]Type) -> (Type, bool) {
+    if len(ts) == 0 do return nil, false
+    return pop(ts), true
 }
 
-peekType :: proc() -> Type {
-    return typeStack[len(typeStack) - 1]
+peekType :: proc(ts:^[dynamic]Type, ) -> Type {
+    return ts[len(ts) - 1]
 }
 
 
-hasTypes :: proc(types: []Type) -> bool {
+hasTypes :: proc(ts:^[dynamic]Type, types: []Type) -> bool {
     if len(types) == 0 do return true
-    if len(typeStack) < len(types) do return false
+    if len(ts) < len(types) do return false
     for ty, i in types {
         // Can accept if wants type Any
-        if ty != .Any && ty != typeStack[len(typeStack) - 1 - i] do return false
+        if ty != .Any && ty != ts[len(ts) - 1 - i] do return false
     }
     return true
 }
 
 // Expects types and pops them
-expectTypes :: proc(types: []Type, loc:util.Location) -> util.ErrorMsg {
+expectTypes :: proc(ts:^[dynamic]Type, types: []Type, loc:util.Location) -> util.ErrorMsg {
     if len(types) == 0 do return nil
-    if len(typeStack) < len(types) {
+    if len(ts) < len(types) {
         return util.locStr(loc, 
             "Expected %d typed values, but got only %d", 
-            len(types), len(typeStack))
+            len(types), len(ts))
     }
     for ty in types {
-        top := pop(&typeStack)
+        top := pop(ts)
         if top != ty && ty != .Any {
             s1, _ := fmt.enum_value_to_string(ty)
             s2, _ := fmt.enum_value_to_string(top)
@@ -65,9 +64,4 @@ expectTypes :: proc(types: []Type, loc:util.Location) -> util.ErrorMsg {
         }
     }
     return nil
-}
-
-handleNextToken :: proc() {
-    
-
 }

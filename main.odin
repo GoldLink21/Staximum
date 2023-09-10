@@ -37,21 +37,21 @@ main :: proc() {
         fmt.printf("%s", err.(string))
         os.exit(1)
     }
-    // tokenizer.printTokens(tokens[:])
+    tokenizer.printTokens(tokens[:])
     // Convert to AST
-    AST, astState, astErr := ast.resolveTokens(tokens[:])
+    block, astErr := ast.resolveTokens(tokens[:])
     if astErr != nil {
-        ast.printASTVars(astState.vars)
-        ast.printAST(AST[:])
+        // ast.printASTVars(block.state.vars)
+        // ast.printAST(block)
         fmt.printf("%s", astErr.(string))
         os.exit(1)
     }
-    AST = ast.optimizeAST(AST, &astState)
-    ast.printASTVars(astState.vars)
-    ast.printAST(AST[:])
+    block = ast.optimizeASTBlock(block)
+    ast.printASTVars(block.state.vars)
+    ast.printAST(block)
 
     when GENERATE_ASM {
-        generator.generateNasmToFile(AST[:], fmt.tprintf("%s.S", outFile))
+        generator.generateNasmToFile(block, fmt.tprintf("%s.S", outFile))
     }
 }
 

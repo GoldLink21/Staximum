@@ -14,6 +14,17 @@ optimizeAST :: proc(input:[dynamic]AST, state:^ASTState) -> ([dynamic]AST) {
     return input
 }
 
+optimizeASTBlock :: proc(block:^ASTBlock) -> ^ASTBlock {
+    rerun := true
+    for rerun {
+        rerun = false
+        for &node in block.nodes {
+            rerun ||= optimizeASTHelp(&node, &block.state)
+        }
+    }
+    return block
+}
+
 optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
     changedSomething := false
     switch type in ast {

@@ -47,207 +47,14 @@ ASTBlock :: struct {
 }
 
 // TODO: Switch to return ASTBlock
-resolveTokens :: proc(tokens:[]Token) -> (out:[dynamic]AST, state: ASTState, err:util.ErrorMsg) {
-    out = make([dynamic]AST)
-    state = {
-        make(map[string]Variable),
-    }
-    // variables := make(map[string]Variable)
-    tw : TokWalk = { tokens, 0 }
-    for cur := curr(&tw); curOk(&tw); cur,_ = next(&tw) {
-        switch cur.type {
-            case .Error: {
-                return out, state, util.locStr(cur.loc, 
-                    "Error Token found\n")
-            }
-            case .IntLit: {
-                pushInt := resolveIntLit(cur) or_return
-                append(&out, pushInt)
-            }
-            case .FloatLit: { 
-                value := new(ASTPushLiteral)
-                value ^= cur.value.(f64)
-                
-                pushType(.Float)
-                append(&out, value)
-            }
-            case .StringLit: { 
-                resolveStringLit(&out, cur) or_return
-            }
-            case .BoolLit: {
-                value := new(ASTPushLiteral)
-                value ^= cur.value.(bool)
-                pushType(.Bool)
-                append(&out, value)
-            }
-            case .Plus: {
-                resolvePlus(&out, cur) or_return
-            }
-            case .Dash: { 
-                resolveDash(&out, cur) or_return
-            }
-            case .Exit: {
-                expectArgs(out, "exit", 
-                    {.Int}, cur.loc) or_return
-                // Break even
-                // popType()
-                // pushType(.Int)
-
-                value := new(ASTSyscall1)
-                value.call = new(ASTPushLiteral)
-                value.call.(^ASTPushLiteral) ^= SYS_EXIT
-                value.arg1 = pop(&out)
-                append(&out, value)
-                // Consider dropping after exit calls cause value will never be used
-                // append(&out, new(Drop))
-            }
-            case .Syscall0: {
-                expectArgs(out, "syscall0", 
-                    {.Int}, cur.loc) or_return
-                pushType(.Int)
-                value := new(ASTSyscall0)
-                value.call = pop(&out)
-                append(&out, value)
-            }
-            case .Syscall1: {
-                expectArgs(out, "syscall1", 
-                    {.Int, .Any}, cur.loc) or_return
-                pushType(.Int)
-                value := new(ASTSyscall1)
-                value.call = pop(&out)
-                value.arg1 = pop(&out)
-                append(&out, value)
-            }
-            case .Syscall2: {
-                expectArgs(out, "syscall2", 
-                    {.Int, .Any, .Any}, cur.loc) or_return
-                pushType(.Int)
-                value := new(ASTSyscall2)
-                value.call = pop(&out)
-                value.arg1 = pop(&out)
-                value.arg2 = pop(&out)
-                append(&out, value)
-            }
-            case .Syscall3: { 
-                expectArgs(out, "syscall3", 
-                    {.Int, .Any, .Any, .Any}, cur.loc) or_return
-                pushType(.Int)
-                value := new(ASTSyscall3)
-                value.call = pop(&out)
-                value.arg1 = pop(&out)
-                value.arg2 = pop(&out)
-                value.arg3 = pop(&out)
-                append(&out, value)
-                // assert(false, "TODO") 
-            }
-            case .Drop: {
-                expectArgs(out, "drop", {.Any}, cur.loc) or_return
-                popType()
-                append(&out, new(ASTDrop))
-            }
-            case .Macro: {
-                return out, state, "TODO"
-            }
-            case .Puts: {
-                // Should this instead become a proc?
-                expectArgs(out, "puts", 
-                    {.Ptr, .Int}, cur.loc) or_return
-
-                value := new(ASTSyscall3)
-                value.call = new(ASTPushLiteral)
-                value.call.(^ASTPushLiteral) ^= SYS_WRITE
-                // stdout
-                value.arg1 = new(ASTPushLiteral)
-                value.arg1.(^ASTPushLiteral) ^= 1
-
-                value.arg2 = pop(&out)
-                value.arg3 = pop(&out)
-                append(&out, value)
-            }
-            case .Gt: { 
-                return out, state, "> AST TODO\n"
-            }
-            case .If: { 
-                return out, state, "< AST TODO\n"
-            }
-            case .Eq: {
-                return out, state, "= AST TODO\n"
-            }
-            case .End: { 
-                return out, state, "end AST TODO\n"
-            }
-            case .Let: { 
-                resolveLet(cur.loc, &tw, &out, &state.vars) or_return
-            }
-            case .Bang: { 
-                return out, state, "! AST TODO\n"
-            }
-            case .Type: { 
-                return out, state, "(type) AST TODO\n"
-            }
-            case .Colon: { 
-                return out, state, ": AST TODO\n"
-            }
-            case .Ident: {
-                // raw ident should give the value from variable
-                varName := cur.value.(string)
-                if varName not_in state.vars {
-                    return out, state, util.locStr(cur.loc, 
-                        "Unknown token of 's'", varName)
-                }
-                varRef := new(ASTVarRef)
-                varRef.ident = varName
-                pushType(state.vars[varName].type)
-                (&state.vars[varName]).used = true
-                append(&out, varRef)
-            }
-            case .OParen: {
-                // Check for type casting
-                if n, ok := peek(&tw); ok && n.type == .Type {
-                    typeToken, _ := next(&tw)
-                    typeValue := typeToken.value.(types.Type)
-                    expectNext(&tw, .CParen)
-                    // Allow only casting from int to float and float to int for now
-
-                    // Ignore if casting to the same type
-                    if peekType() == typeValue do continue
-                    if peekType() == .Int && typeValue == .Float {
-                        popType()
-                        pushType(.Float)
-                        unop := new(ASTUnaryOp)
-                        unop.op = .CastIntToFloat
-                        unop.value = pop(&out)
-                        append(&out, unop)
-                        continue
-                    } else if peekType() == .Float && typeValue == .Int {
-                        popType()
-                        pushType(.Int)
-                        unop := new(ASTUnaryOp)
-                        unop.op = .CastFloatToInt
-                        unop.value = pop(&out)
-                        append(&out, unop)
-                        continue
-                    }
-                    return out, state, "Cannot currently cast to and from anything except int and float"
-                }
-                return out, state, "Invalid character after ("
-            }
-            case .CParen: { 
-                return out, state, ") AST TODO\n"
-            }
-            case .OBrace: {
-                return out, state, "{ AST TODO\n"
-            }
-            case .CBrace: {
-                return out, state,  "} AST TODO\n"
-            }
-        }
-    }
-    return out, state, nil
+resolveTokens :: proc(tokens:[]Token) -> (out:^ASTBlock, err:util.ErrorMsg) {
+    tw : TokWalk = { tokens, 0, {} }
+    block := resolveBlock(&tw, true) or_return
+    return block, nil
 }
 
-resolveBlock :: proc(tw:^TokWalk) -> ^ASTBlock {
-    block := new(ASTBlock)
+resolveBlock :: proc(tw:^TokWalk, isRoot:=false) -> (block:^ASTBlock, err:ErrorMsg) {
+    block = new(ASTBlock)
     block.nodes = make([dynamic]AST)
     block.state = {
         make(map[string]Variable)
@@ -256,84 +63,299 @@ resolveBlock :: proc(tw:^TokWalk) -> ^ASTBlock {
     // Type stack
     ts := &block.outputTypes
     out := &block.nodes
-    // TODO
-    return block
+    vars := &block.state.vars
+    for curOk(tw) {
+        exitBlk := resolveNextToken(tw, ts, vars, out) or_return
+        if exitBlk {
+            if isRoot {
+                return block, util.locStr(tw.loc, "Found } in root")
+            } else {
+                return block, nil
+            }
+        }
+    }
+    if isRoot {
+        return block, nil
+    }
+    return block, "Reached end of input without closing block"
+}
+
+resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (exitBlock := false, err:ErrorMsg=nil){
+    if !curOk(tw) do return {}, "Expected next token, but had nothing"
+    cur := curr(tw)
+    switch cur.type {
+        case .Error: {
+            return {}, util.locStr(cur.loc, 
+                "Error Token found\n")
+        }
+        case .IntLit: {
+            intLit := resolveIntLit(ts, cur) or_return
+            append(curAST, intLit)
+        }
+        case .FloatLit: { 
+            value := new(ASTPushLiteral)
+            value ^= cur.value.(f64)
+            pushType(ts, .Float)
+            append(curAST, value)
+        }
+        case .StringLit: { 
+            len, str := resolveStringLit(ts, cur) or_return
+            append(curAST, len)
+            append(curAST, str)
+        }
+        case .BoolLit: {
+            value := new(ASTPushLiteral)
+            value ^= cur.value.(bool)
+            pushType(ts, .Bool)
+            append(curAST, value)
+        }
+        case .Plus: {
+            plus := resolvePlus(curAST, ts, cur) or_return
+            append(curAST, plus)
+        }
+        case .Dash: { 
+            dash := resolveDash(curAST, ts, cur) or_return
+            append(curAST, dash)
+        }
+        case .Exit: {
+            expectArgs(curAST^, ts, "exit", 
+                {.Int}, cur.loc) or_return
+            // Break even
+            // popType()
+            // pushType(.Int)
+
+            value := new(ASTSyscall1)
+            value.call = new(ASTPushLiteral)
+            value.call.(^ASTPushLiteral) ^= SYS_EXIT
+            value.arg1 = pop(curAST)
+            append(curAST, value)
+            // Consider dropping after exit calls cause value will never be used
+            // append(&out, new(Drop))
+        }
+        case .Syscall0: {
+            expectArgs(curAST^, ts, "syscall0", 
+                {.Int}, cur.loc) or_return
+            pushType(ts, .Int)
+            value := new(ASTSyscall0)
+            value.call = pop(curAST)
+            append(curAST, value)
+        }
+        case .Syscall1: {
+            expectArgs(curAST^, ts, "syscall1", 
+                {.Int, .Any}, cur.loc) or_return
+            pushType(ts, .Int)
+            value := new(ASTSyscall1)
+            value.call = pop(curAST)
+            value.arg1 = pop(curAST)
+            append(curAST, value)
+        }
+        case .Syscall2: {
+            expectArgs(curAST^, ts, "syscall2", 
+                {.Int, .Any, .Any}, cur.loc) or_return
+            pushType(ts, .Int)
+            value := new(ASTSyscall2)
+            value.call = pop(curAST)
+            value.arg1 = pop(curAST)
+            value.arg2 = pop(curAST)
+            append(curAST, value)
+        }
+        case .Syscall3: { 
+            expectArgs(curAST^, ts, "syscall3", 
+                {.Int, .Any, .Any, .Any}, cur.loc) or_return
+            pushType(ts, .Int)
+            value := new(ASTSyscall3)
+            value.call = pop(curAST)
+            value.arg1 = pop(curAST)
+            value.arg2 = pop(curAST)
+            value.arg3 = pop(curAST)
+            append(curAST, value)
+        }
+        case .Drop: {
+            expectArgs(curAST^, ts, "drop", {.Any}, cur.loc) or_return
+            popType(ts)
+            append(curAST, new(ASTDrop))
+        }
+        case .Macro: {
+            return false, "TODO"
+        }
+        case .Puts: {
+            // Should this instead become a proc?
+            expectArgs(curAST^, ts, "puts", 
+                {.Ptr, .Int}, cur.loc) or_return
+
+            value := new(ASTSyscall3)
+            value.call = new(ASTPushLiteral)
+            value.call.(^ASTPushLiteral) ^= SYS_WRITE
+            // stdout
+            value.arg1 = new(ASTPushLiteral)
+            value.arg1.(^ASTPushLiteral) ^= 1
+
+            value.arg2 = pop(curAST)
+            value.arg3 = pop(curAST)
+            append(curAST, value)
+        }
+        case .Gt: { 
+            return false, "> AST TODO"
+        }
+        case .If: { 
+            return false, "< AST TODO"
+        }
+        case .Eq: {
+            return false, "= AST TODO"
+        }
+        case .End: { 
+            return false, "end AST TODO"
+        }
+        case .Let: { 
+            resolveLet(cur.loc, tw, vars) or_return
+        }
+        case .Bang: { 
+            return false, "! AST TODO"
+        }
+        case .Type: { 
+            return false, "(type) AST TODO"
+        }
+        case .Colon: { 
+            return false, ": AST TODO"
+        }
+        case .Ident: {
+            // raw ident should give the value from variable
+            varName := cur.value.(string)
+            if varName not_in vars {
+                return {}, util.locStr(cur.loc, 
+                    "Unknown token of 's'", varName)
+            }
+            varRef := new(ASTVarRef)
+            varRef.ident = varName
+            pushType(ts, vars[varName].type)
+            (&vars[varName]).used = true
+            append(curAST, varRef)
+        }
+        case .OParen: {
+            // Check for type casting
+            if n, ok := peek(tw); ok && n.type == .Type {
+                typeToken, _ := next(tw)
+                typeValue := typeToken.value.(types.Type)
+                expectNext(tw, .CParen)
+                // Allow only casting from int to float and float to int for now
+
+                // Ignore if casting to the same type
+                if peekType(ts) == typeValue do return {}, nil
+                if peekType(ts) == .Int && typeValue == .Float {
+                    popType(ts)
+                    pushType(ts, .Float)
+                    unop := new(ASTUnaryOp)
+                    unop.op = .CastIntToFloat
+                    unop.value = pop(curAST)
+                    append(curAST, unop)
+                    next(tw)
+                    return
+                }
+                if peekType(ts) == .Float && typeValue == .Int {
+                    popType(ts)
+                    pushType(ts, .Int)
+                    unop := new(ASTUnaryOp)
+                    unop.op = .CastFloatToInt
+                    unop.value = pop(curAST)
+                    append(curAST, unop)
+                    next(tw)
+                    return
+                }
+                return false, "Cannot currently cast to and from anything except int and float"
+            }
+            return false, "Invalid character after ("
+        }
+        case .CParen: { 
+            return false, ") AST TODO"
+        }
+        case .OBrace: {
+            next(tw)
+            block := resolveBlock(tw, false) or_return
+            append(curAST, block)
+            // return false, "{ AST TODO\n"
+        }
+        case .CBrace: {
+            next(tw)
+            return true, nil
+        }
+    }
+    next(tw)
+    return false, nil
 }
 
 
-resolveIntLit :: proc(intLit:Token) -> (^ASTPushLiteral, util.ErrorMsg) {
+resolveIntLit :: proc(ts:^[dynamic]Type, intLit:Token) -> (^ASTPushLiteral, util.ErrorMsg) {
     if intLit.type != .IntLit do return nil, util.locStr(intLit.loc,
         "Invalid token type for an Int Lit")
     value := newIntLit(intLit.value.(int))
-    pushType(.Int)
+    pushType(ts, .Int)
     return value, nil
 }
 
 // Handle setting up "string lit" AST 
-resolveStringLit :: proc(out:^([dynamic]AST), strLit:Token) -> ErrorMsg {
+resolveStringLit :: proc(ts:^[dynamic]Type, strLit:Token) -> (^ASTPushLiteral, ^ASTPushLiteral, ErrorMsg) {
     // Length
     length := new(ASTPushLiteral)
     length ^= len(strLit.value.(string))
-    pushType(.Int)
-    append(out, length)  
+    pushType(ts, .Int)
+    // append(out, length)  
 
     // Label
     value := new(ASTPushLiteral)
     value ^= strLit.value.(string)
-    pushType(.Ptr)
-    append(out, value) 
-    return nil
+    pushType(ts, .Ptr)
+    // append(out, value) 
+    return length, value, nil
 }
 
 // Handle setting up plus AST
-resolvePlus :: proc(out:^[dynamic]AST, plus:Token) -> ErrorMsg {
+resolvePlus :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, plus:Token) -> (op:^ASTBinOp = nil, err:ErrorMsg) {
     // Requires 2 things on the stack
-    expectArgs(out^, "+", {}, plus.loc) or_return
+    expectArgs(curAST^, ts, "+", {}, plus.loc) or_return
     // Manual type check
-    if len(typeStack) < 2 {
-        return fmt.tprintf("Op '+' requires 2 inputs but got %d\n", len(typeStack))
+    if len(ts) < 2 {
+        return nil, fmt.tprintf("Op '+' requires 2 inputs but got %d\n", len(ts))
     }
     // TODO: Add float support
-    if !hasTypes({.Int, .Int}) {
-        return "Invalid argument types for op '+'\n"
+    if !hasTypes(ts, {.Int, .Int}) {
+        return nil, "Invalid argument types for op '+'\n"
     }
     // Types must match, so can just drop one of type
-    popType()
+    popType(ts)
     // Optimize out simple operations
     value := new(ASTBinOp)
-    value.lhs = pop(out)
-    value.rhs = pop(out)
+    value.lhs = pop(curAST)
+    value.rhs = pop(curAST)
     // TODO: Consider changing to PlusInt and PlusFloat 
     value.op = .Plus
-    append(out, value)
-    return nil
+    return value, nil
 }
 
 // Handle setting up subtraction AST
-resolveDash :: proc(out:^[dynamic]AST, dash:Token) -> ErrorMsg {
+resolveDash :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, dash:Token) -> (op:^ASTBinOp, err:ErrorMsg) {
     // Requires 2 things on the stack
-    expectArgs(out^, "-", {}, dash.loc) or_return
+    expectArgs(curAST^, ts, "-", {}, dash.loc) or_return
     // Manual type check after
-    if len(typeStack) < 2 {
-        return "Op '-' requires 2 inputs"
+    if len(ts) < 2 {
+        return nil, "Op '-' requires 2 inputs"
     }
     // TODO: Add float support
-    if !hasTypes({.Int, .Int}) {
-        return "Invalid argument types for op '-'\n"
+    if !hasTypes(ts, {.Int, .Int}) {
+        return nil, "Invalid argument types for op '-'\n"
     }
     // Types must match, so can just drop one of type
-    popType()
+    popType(ts)
     // Optimize out simple operations
     value := new(ASTBinOp)
-    value.lhs = pop(out)
-    value.rhs = pop(out)
+    value.lhs = pop(curAST)
+    value.rhs = pop(curAST)
     // TODO: Consider MinusInt and MinusFloat ops
     value.op = .Minus
-    append(out, value)
-    return nil
+    // append(out, value)
+    return value, nil
 }
 
-resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, out:^[dynamic]AST, vars: ^map[string]Variable) -> ErrorMsg {
+resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Variable) -> ErrorMsg {
     ident, ok := peek(tw)
     if !ok {
         // Reached end of input
@@ -394,7 +416,7 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, out:^[dynamic]AST, v
 }
 
 // Will eat types passed in
-expectArgs :: proc(out : [dynamic]AST, label:string, types:[]Type, loc:tokenizer.Location) -> util.ErrorMsg {
+expectArgs :: proc(out : [dynamic]AST, ts:^[dynamic]Type, label:string, types:[]Type, loc:tokenizer.Location) -> util.ErrorMsg {
     if len(out) < len(types) {
         return util.locStr(loc, 
             "%s requries %d argument%s", 
@@ -402,7 +424,7 @@ expectArgs :: proc(out : [dynamic]AST, label:string, types:[]Type, loc:tokenizer
             (len(types))==1?"":"s"
         )
     }
-    return expectTypes(types, loc)
+    return expectTypes(ts, types, loc)
 }
 
 printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) {
@@ -496,10 +518,8 @@ printASTVars :: proc(vars:map[string]Variable) {
     }
 }
 
-printAST :: proc(ast:[]AST) {
+printAST :: proc(ast:AST) {
     sb: strings.Builder
-    for a in ast {
-        printASTHelper(a, &sb)
-    }
+    printASTHelper(ast, &sb)
     fmt.printf("%s\n", strings.to_string(sb))
 }

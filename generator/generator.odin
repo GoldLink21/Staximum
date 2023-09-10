@@ -17,23 +17,23 @@ ASMContext :: struct {
     floatLits : map[f64]string,
 }
 
-generateNasmToFile :: proc(as:[]ast.AST, outFile:string) {
+generateNasmToFile :: proc(block:^ast.ASTBlock, outFile:string) {
     os.remove(outFile)
     fd, err := os.open(outFile, os.O_CREATE | os.O_WRONLY, 0o777)
     if err == -1 {
         fmt.assertf(false, "Error Opening output assembly")
     }
     defer os.close(fd)
-    os.write_string(fd, generateNasmFromAST(as, nil))
+    os.write_string(fd, generateNasmFromASTBlock(block))
 }
 
-generateNasmFromAST :: proc(as : []ast.AST, asmCtx:^ASMContext) -> string {
+generateNasmFromASTBlock :: proc(block : ^ast.ASTBlock) -> string {
     sb : strings.Builder
     strings.write_string(&sb, "   section .text\nglobal _start\n_start:\n")
     
     ctx : ASMContext = {}
 
-    for &a in as {
+    for &a in block.nodes {
         generateNasmFromASTHelp(&sb, &ctx, &a)
     }
     strings.write_string(&sb, "\n   ; Safe exit if it makes it to the end\n   mov rax, 60\n   mov rdi, 0\n   syscall\n")

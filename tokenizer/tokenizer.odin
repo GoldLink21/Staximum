@@ -90,13 +90,13 @@ parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     startIdx := tok.i
     token : Token = {.Ident, tok.loc, nil}
     // Make sure you don't go past the end
-    for curGood(tok) {
-        if nextChar, _ := next(tok); !isAlnum(nextChar) {
+    for cur:= curT(tok); curGood(tok); cur, _ = next(tok) {
+        if nextChar, _ := peekNext(tok); !isAlnum(nextChar) {
             break
         }
     }
     // Handle checking what the token is
-    text := tok.text[startIdx:tok.i]
+    text := tok.text[startIdx:tok.i+1]
     if text in IdentifierTokens {
         // Just a string that is a token value
         token.type = IdentifierTokens[text]
@@ -113,8 +113,6 @@ parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
         token.value = text
     }
     // Add back next char
-    tok.i -= 1
-    // tok.loc.col -= 1
     return token, nil
 }
 
