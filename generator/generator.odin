@@ -15,23 +15,50 @@ ASMContext :: struct {
     stringLits : map[string]string,
     // Float labels
     floatLits : map[f64]string,
+    vars: map[string]ast.Variable,
 }
 
-generateNasmToFile :: proc(block:^ast.ASTBlock, outFile:string) {
+generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
     os.remove(outFile)
     fd, err := os.open(outFile, os.O_CREATE | os.O_WRONLY, 0o777)
     if err == -1 {
         fmt.assertf(false, "Error Opening output assembly")
     }
     defer os.close(fd)
-    os.write_string(fd, generateNasmFromASTBlock(block))
+    os.write_string(fd, generateNasmFromProgram(program))
+}
+
+generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
+    sb: strings.Builder
+    strings.write_string(&sb, 
+        "   section .text\nglobal _start\n_start:\n   jmp main\n")
+    
+    for name,pr in program.procs {
+        strings.write_string(&sb,name)
+        strings.write_string(&sb, ":\n")
+        a : ast.AST = pr.body
+        generateNasmFromASTHelp(&sb, {}, &a)
+    }
+
+    return strings.to_string(sb)
 }
 
 generateNasmFromASTBlock :: proc(block : ^ast.ASTBlock) -> string {
     sb : strings.Builder
     strings.write_string(&sb, "   section .text\nglobal _start\n_start:\n")
     
-    ctx : ASMContext = {}
+    vars := block.state.vars
+
+    ctx : ASMContext = {
+        make(map[string]string),
+        make(map[f64]string),
+        vars,
+    }
+    for k, &v in block.state.vars {
+        ctx.vars[k] = {
+
+        }
+    }
 
     for &a in block.nodes {
         generateNasmFromASTHelp(&sb, &ctx, &a)
@@ -130,7 +157,9 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             pushReg(sb, "rax")
         }
         case ^ASTBlock: {
-            assert(false, "TODO\n")
+            for &node in ty.nodes {
+                generateNasmFromASTHelp(sb, ctx, &node)
+            }
         }
         case ^ASTDrop: {
             // Move the stack pointer back to ignore the value that was there
@@ -138,7 +167,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         }
         case ^ASTVarRef: {
             // TODO
-            assert(false, "TODO\n")
+            assert(false, "TODO asm var ref\n")
+        }
+        case ^ASTVarDef: {
+            assert(false, "TODO asm vardef\n")
         }
     }
 }

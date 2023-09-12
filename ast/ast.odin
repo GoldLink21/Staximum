@@ -30,13 +30,15 @@ AST :: union #no_nil {
     ^ASTDrop,
     ^ASTBlock,
     ^ASTVarRef,
+    ^ASTVarDef,
 }
 
 // Full program here
 //  TODO: Switch resolveTokens to return this
 ASTProgram :: struct {
     main:^ASTBlock,
-    macros:map[string]Macro
+    procs:map[string]^Procedure,
+    macros:map[string]^Macro,
 }
 
 ASTBlock :: struct {
@@ -46,18 +48,115 @@ ASTBlock :: struct {
     outputTypes:[dynamic]Type
 }
 
-// TODO: Switch to return ASTBlock
-resolveTokens :: proc(tokens:[]Token) -> (out:^ASTBlock, err:util.ErrorMsg) {
+// TODO: Switch to return ASTProgram
+resolveTokens :: proc(tokens:[]Token) -> (out:^ASTProgram, err:util.ErrorMsg) {
     tw : TokWalk = { tokens, 0, {} }
-    block := resolveBlock(&tw, true) or_return
-    return block, nil
+    program := resolveProgram(&tw) or_return
+    return program, nil
 }
 
-resolveBlock :: proc(tw:^TokWalk, isRoot:=false) -> (block:^ASTBlock, err:ErrorMsg) {
+// Parses the entire program
+resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
+    program = new(ASTProgram)
+    ok : bool
+    for cur := curr(tw); curOk(tw); cur,_ = next(tw) {
+        if cur.type == .Macro {
+            macro := new(Macro)
+            macro.inputs  = make([dynamic]Type)
+            macro.outputs = make([dynamic]Type)
+            
+            // Eat 'macro'
+            cur, ok = next(tw)
+            if !ok { return program, "Expected Identifier\n" }
+            macroName := cur.value.(string)
+            macro.defLoc = cur.loc
+            if macroName in program.macros {
+                return program, util.locStr(cur.loc, 
+                    "Redeclaration of macro")
+            }
+            if macroName in program.procs {
+                return program, util.locStr(cur.loc, 
+                    "Redeclaration of proc")
+            }
+            if macroName == "main" {
+                return program, util.locStr(macro.defLoc, 
+                    "Cannot name a macro 'main'. Reserved for the entry point")
+            }
+            // :
+            _, ok  = tryNext(tw, .Colon)
+            if ok do resolveTypes(tw, &macro.inputs)
+            // >
+            _, ok = tryNext(tw, .Gt)
+            if ok do resolveTypes(tw, &macro.outputs)
+            // {
+            cur, ok := next(tw)
+            if cur.type != .OBrace do return program, util.locStr(cur.loc, 
+                "Expected an '{{' to start ")
+            // Eat {
+            next(tw)
+            macro.body = resolveBlock(tw, program, {}) or_return
+            /*
+            if len(macro.body.outputTypes) != len(macro.outputs) {
+                return program, util.locStr(macro.defLoc, 
+                    "Got the incorrect amount of return value than expected for macro %s",
+                    macroName)
+            }*/
+            program.macros[macroName] = macro
+        } else if cur.type == .Proc {
+            procc := new(Procedure)
+            procc.inputs  = make([dynamic]Type)
+            procc.outputs = make([dynamic]Type)
+            
+            // Eat 'macro'
+            cur, ok = next(tw)
+            if !ok { return program, "Expected Identifier\n" }
+            procName := cur.value.(string)
+            procc.defLoc = cur.loc
+            if procName in program.macros {
+                return program, util.locStr(cur.loc, 
+                    "Redeclaration of macro")
+            }
+            if procName in program.procs {
+                return program, util.locStr(cur.loc, 
+                    "Redeclaration of proc")
+            }
+            // :
+            _, ok  = tryNext(tw, .Colon)
+            if ok do resolveTypes(tw, &procc.inputs)
+            // >
+            _, ok = tryNext(tw, .Gt)
+            if ok do resolveTypes(tw, &procc.outputs)
+            // {
+            cur, ok := next(tw)
+            if cur.type != .OBrace do return program, util.locStr(cur.loc, 
+                "Expected an '{{' to start ")
+            // Eat {
+            next(tw)
+            procc.body = resolveBlock(tw, program, {}) or_return
+            program.procs[procName] = procc
+        } else {
+            return program, util.locStr(cur.loc, 
+                "Global scope can only include macro and proc statements")
+        }
+    }
+    return program, nil
+}
+
+// Reads all the next type tokens and puts them into the given buffer
+resolveTypes :: proc(tw:^TokWalk, out :^[dynamic]Type) {
+    for type, hasType := tryNext(tw, .Type); hasType; type, hasType = tryNext(tw, .Type) {
+        append(out, type.value.(types.Type))
+    }
+}
+
+resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variable) -> (block:^ASTBlock, err:ErrorMsg) {
     block = new(ASTBlock)
     block.nodes = make([dynamic]AST)
     block.state = {
         make(map[string]Variable)
+    }
+    for k, &v in inVars {
+        block.state.vars[k] = v
     }
     block.outputTypes = make([dynamic]Type)
     // Type stack
@@ -65,22 +164,14 @@ resolveBlock :: proc(tw:^TokWalk, isRoot:=false) -> (block:^ASTBlock, err:ErrorM
     out := &block.nodes
     vars := &block.state.vars
     for curOk(tw) {
-        exitBlk := resolveNextToken(tw, ts, vars, out) or_return
-        if exitBlk {
-            if isRoot {
-                return block, util.locStr(tw.loc, "Found } in root")
-            } else {
-                return block, nil
-            }
+        if resolveNextToken(tw, ts, program, vars, out) or_return  {
+            return block, nil
         }
     }
-    if isRoot {
-        return block, nil
-    }
-    return block, "Reached end of input without closing block"
+    return block, "Reached end of input without closing block\n"
 }
 
-resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (exitBlock := false, err:ErrorMsg=nil){
+resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (exitBlock := false, err:ErrorMsg=nil){
     if !curOk(tw) do return {}, "Expected next token, but had nothing"
     cur := curr(tw)
     switch cur.type {
@@ -176,6 +267,8 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, vars:^map[string]Variab
             append(curAST, new(ASTDrop))
         }
         case .Macro: {
+            // macro := resolveMacro(tw) or_return
+            
             return false, "TODO"
         }
         case .Puts: {
@@ -207,7 +300,8 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, vars:^map[string]Variab
             return false, "end AST TODO"
         }
         case .Let: { 
-            resolveLet(cur.loc, tw, vars) or_return
+            letDef := resolveLet(cur.loc, tw, vars, program) or_return
+            append(curAST, letDef)
         }
         case .Bang: { 
             return false, "! AST TODO"
@@ -221,15 +315,32 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, vars:^map[string]Variab
         case .Ident: {
             // raw ident should give the value from variable
             varName := cur.value.(string)
-            if varName not_in vars {
-                return {}, util.locStr(cur.loc, 
-                    "Unknown token of 's'", varName)
+            if varName in vars {
+                // Variable
+                varRef := new(ASTVarRef)
+                varRef.ident = varName
+                pushType(ts, vars[varName].type)
+                (&vars[varName]).used = true
+                append(curAST, varRef)
+                return false, nil
+            } else if varName in program.macros {
+                // Macro
+                mac : ^Macro = program.macros[varName]
+                // Check input types
+                expectTypes(ts, mac.inputs[:], cur.loc) or_return
+                // Replace with body
+                append(curAST, mac.body)
+                // Place output types
+                for out in mac.outputs {
+                    append(ts, out)
+                }
+                next(tw)
+                return false, nil
+            } else if varName in program.procs {
+                // Procedure
             }
-            varRef := new(ASTVarRef)
-            varRef.ident = varName
-            pushType(ts, vars[varName].type)
-            (&vars[varName]).used = true
-            append(curAST, varRef)
+            return false, util.locStr(cur.loc, 
+                "Unknown token of '%s'", varName)
         }
         case .OParen: {
             // Check for type casting
@@ -270,19 +381,22 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, vars:^map[string]Variab
         }
         case .OBrace: {
             next(tw)
-            block := resolveBlock(tw, false) or_return
-            append(curAST, block)
-            // return false, "{ AST TODO\n"
+            block := resolveBlock(tw, program, vars^) or_return
+            // Make sure the block is not empty
+            if len(block.nodes) > 0 {
+                append(curAST, block)
+            }
         }
         case .CBrace: {
-            next(tw)
             return true, nil
+        }
+        case .Proc: {
+            return false, "Cannot have a proc outside the global scope\n"
         }
     }
     next(tw)
     return false, nil
 }
-
 
 resolveIntLit :: proc(ts:^[dynamic]Type, intLit:Token) -> (^ASTPushLiteral, util.ErrorMsg) {
     if intLit.type != .IntLit do return nil, util.locStr(intLit.loc,
@@ -355,11 +469,11 @@ resolveDash :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, dash:Token) -> (op:
     return value, nil
 }
 
-resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Variable) -> ErrorMsg {
+resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Variable, program:^ASTProgram) -> (var:^ASTVarDef=nil,err:ErrorMsg) {
     ident, ok := peek(tw)
     if !ok {
         // Reached end of input
-        return util.locStr(startLoc, 
+        return nil, util.locStr(startLoc, 
             "Keyword 'let' requires an identifier after it")
     }
     // Eat identifier
@@ -367,21 +481,38 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Va
     varName := ident.value.(string)
     // Check if this variable exists already
     if varName in vars {
-        return util.locStr(curr(tw).loc, 
+        return nil, util.locStr(curr(tw).loc, 
             "Redeclaration of var '%s'", varName)
     }
     // Eat = after
     eq := expectNext(tw, .Eq) or_return
     nextT, ok2 := next(tw)
     if !ok2 {
-        return util.locStr(eq.loc, 
+        return nil, util.locStr(eq.loc, 
             "Expected a value to set variable to after it")
     }
     // { values } syntax
     if nextT.type == .OBrace {
-        return util.locStr(nextT.loc, 
-            "Currently, {{ is not supported for var defs")
+        // Eat {
+        next(tw)
+        block := resolveBlock(tw, program, vars^) or_return
+        if len(block.outputTypes) != 1 {
+            return nil, util.locStr(nextT.loc, 
+                "Setting variables to a block requires one output type")
+        }
+        vars[varName] = {
+            varName,
+            .Int,
+            false,
+            false,
+            block,
+        }
+        varDef := new(ASTVarDef)
+        varDef.ident = varName
+        varDef.value = block
+        return varDef, nil
     }
+    /*
     // let x = 1
     if nextT.type == .IntLit {
         pushLit := newIntLit(nextT.value.(int))
@@ -410,8 +541,9 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Va
     }
     // TODO: Allow setting to another variable
     nt, _ := peek(tw)
-    return util.locStr(nt.loc, 
-        "Expected a literal value here\n")
+    */
+    return nil, util.locStr(nextT.loc, 
+        "Expected a block value here\n")
     // return out, "let TODO\n"
 }
 
@@ -499,27 +631,57 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             return
         }
         case ^ASTBlock: {
-            strings.write_string(sb, "Block {\n")
+            strings.write_string(sb, "{\n")
             for as in ty.nodes {
                 printASTHelper(as, sb, true, indent + 1)
             }
+        }
+        case ^ASTVarDef: {
+            strings.write_string(sb, "let ")
+            strings.write_string(sb, ty.ident)
+            strings.write_string(sb, " =")
+            // Same indent because we want it to be indented 1 level in block
+            printASTHelper(ty.value, sb, false, indent)
+            // No closing }
+            return
         }
     }
     for i in 0..<indent do strings.write_byte(sb, ' ')
     strings.write_string(sb, "}\n")
 }
 
-printASTVars :: proc(vars:map[string]Variable) {
-    sb : strings.Builder
-    for k, v in vars {
-        fmt.printf("var %s : %s = {{\n", v.label, v.type)
-        printASTHelper(v.value, &sb, false, 1)
-        fmt.printf("%s}\n", strings.to_string(sb))
-    }
-}
 
-printAST :: proc(ast:AST) {
+printProgram :: proc(program:^ASTProgram) {
     sb: strings.Builder
-    printASTHelper(ast, &sb)
+    for k, mac in program.macros {
+        strings.write_string(&sb, "macro ")
+        strings.write_string(&sb, k)
+        strings.write_string(&sb, " :")
+        for i in mac.inputs {
+            strings.write_string(&sb, types.TypeToString[i])
+            strings.write_byte(&sb, ' ')
+        }
+        strings.write_string(&sb, "> ")
+        for o in mac.outputs {
+            strings.write_string(&sb, types.TypeToString[o])
+            strings.write_byte(&sb, ' ')
+        }
+        printASTHelper(AST(mac.body), &sb, false, 0)
+    }
+    for n,pr in program.procs {
+        strings.write_string(&sb, "proc ")
+        strings.write_string(&sb, n)
+        strings.write_string(&sb, " :")
+        for i in pr.inputs {
+            strings.write_string(&sb, types.TypeToString[i])
+            strings.write_byte(&sb, ' ')
+        }
+        strings.write_string(&sb, "> ")
+        for o in pr.outputs {
+            strings.write_string(&sb, types.TypeToString[o])
+            strings.write_byte(&sb, ' ')
+        }
+        printASTHelper(AST(pr.body), &sb, false, 0)
+    }
     fmt.printf("%s\n", strings.to_string(sb))
 }

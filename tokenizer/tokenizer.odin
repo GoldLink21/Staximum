@@ -19,6 +19,8 @@ Tokenizer :: struct {
     text : string,
     loc: Location,
     i: int,
+    // This is the last column before last character
+    oldCol: int,
 }
 
 // Tokenize a string. File is used solely for debugging
@@ -28,6 +30,7 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
         text=content[:],
         loc={ 1,1, file[:] },
         i = 0,
+        oldCol = 0,
     }
     output = make([dynamic]Token)
     for char := curT(&tok); curGood(&tok); char, _ = next(&tok) {
@@ -163,6 +166,7 @@ parseNumber :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     } else {
         assert(false, "BUG: This should not occur")
     }
+    goBack(tok)
     return token, nil
 }
 
@@ -300,6 +304,15 @@ peekNext :: proc(tok:^Tokenizer) -> (u8, bool) {
     if tok.i + 1 >= len(tok.text) do return 0, false
     return tok.text[tok.i + 1], true
 }
+goBack :: proc(tok:^Tokenizer) {
+    tok.i -= 1
+    if tok.text[tok.i] == '\n' {
+        tok.loc.col = uint(tok.oldCol)
+        tok.loc.line -= 1
+    } else {
+        tok.loc.col -= 1
+    }
+}
 
 // Peek & Consume
 next :: proc(tok:^Tokenizer) -> (u8, bool) {
@@ -307,8 +320,10 @@ next :: proc(tok:^Tokenizer) -> (u8, bool) {
     if !curGood(tok) do return 0, false
     if tok.text[tok.i] == '\n' {
         tok.loc.line += 1
+        tok.oldCol = int(tok.loc.col)
         tok.loc.col = 0
     } else {
+        tok.oldCol = int(tok.loc.col)
         tok.loc.col += 1
     }
     return tok.text[tok.i], true

@@ -14,6 +14,17 @@ optimizeAST :: proc(input:[dynamic]AST, state:^ASTState) -> ([dynamic]AST) {
     return input
 }
 
+optimizeASTProgram :: proc(program: ^ASTProgram) -> ^ASTProgram {
+    // TODO:
+    for _, mac in program.macros {
+        optimizeASTBlock(mac.body)
+    }
+    for _, pr in program.procs {
+        optimizeASTBlock(pr.body)
+    }
+    return program
+}
+
 optimizeASTBlock :: proc(block:^ASTBlock) -> ^ASTBlock {
     rerun := true
     for rerun {
@@ -116,6 +127,9 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
                 changedSomething ||= optimizeASTHelp(&node, state)
             }
             // Remove unused vars
+        }
+        case ^ASTVarDef: {
+            changedSomething ||= optimizeASTHelp(&type.value, state)
         }
         // No optimizations
         case ^ASTPushLiteral, ^ASTDrop, ^ASTVarRef: {}

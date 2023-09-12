@@ -1,6 +1,7 @@
 package ast
 
 import "../types"
+import "../util"
 
 // Holds value to push
 ASTDrop :: distinct rawptr
@@ -78,10 +79,20 @@ Variable :: struct {
     value:AST,
 }
 
+// In place replacement when calling
 Macro :: struct {
-    inputs:[]Type,
-    outputs:[]Type,
-    ast:[]AST
+    inputs:[dynamic]Type,
+    outputs:[dynamic]Type,
+    body:^ASTBlock,
+    defLoc: util.Location
+}
+
+// Procedures are generated differently than macros
+Procedure :: struct {
+    body:^ASTBlock,
+    inputs:[dynamic]Type,
+    outputs:[dynamic]Type,
+    defLoc: util.Location
 }
 
 newIntLit :: proc(val:int) -> (^ASTPushLiteral) {
