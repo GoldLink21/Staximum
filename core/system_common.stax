@@ -1,0 +1,104 @@
+// syscall numbers stolen from https://blog.rchapman.org/posts/Linux_System_Call_Table_for_x86_64/
+
+// Files
+macro SYS_READ                   > int {   0 }
+macro SYS_WRITE                  > int {   1 }
+
+macro SYS_OPEN                   > int {   2 }
+// Needs null terminated string
+macro fopen : ptr int int > int {
+    SYS_OPEN syscall3
+}
+
+macro SYS_CLOSE                  > int {   3 }
+macro fclose : int > int {
+    SYS_CLOSE syscall1
+}
+// Memory
+macro SYS_MMAP                   > int {   9 }
+macro SYS_MPROTECT               > int {  10 }
+macro SYS_MUNMAP                 > int {  11 }
+
+macro SYS_NANOSLEEP              > int {  35 }
+macro SYS_GETITIMER              > int {  36 }
+macro SYS_ALARM                  > int {  37 }
+macro SYS_SETITIMER              > int {  38 }
+macro SYS_GETPID                 > int {  39 }
+
+// Networking and sockets
+macro SYS_SENDFILE               > int {  40 }
+macro SYS_SOCKET                 > int {  41 }
+macro SYS_CONNECT                > int {  42 }
+macro SYS_ACCEPT                 > int {  43 }
+macro SYS_SENDTO                 > int {  44 }
+macro SYS_RECVFROM               > int {  45 }
+macro SYS_SENDMSG                > int {  46 }
+macro SYS_RECVMSG                > int {  47 }
+macro SYS_SHUTDOWN               > int {  48 }
+macro SYS_BIND                   > int {  49 }
+macro SYS_LISTEN                 > int {  50 }
+macro SYS_GETSOCKNAME            > int {  51 }
+macro SYS_GETPEERNAME            > int {  52 }
+macro SYS_SOCKETPAIR             > int {  53 }
+macro SYS_SETSOCKOPT             > int {  54 }
+macro SYS_GETSOCKOPT             > int {  55 }
+
+// System
+macro SYS_CLONE                  > int {  56 }
+macro SYS_FORK                   > int {  57 }
+macro fork > int {
+    SYS_FORK syscall0
+}
+
+macro SYS_VFORK                  > int {  58 }
+macro SYS_EXECVE                 > int {  59 }
+macro SYS_EXIT                   > int {  60 }
+macro SYS_WAIT4                  > int {  61 }
+macro SYS_KILL                   > int {  62 }
+macro SYS_UNAME                  > int {  63 }
+
+// Semaphores
+macro SYS_SEMGET                 > int {  64 }
+macro SYS_SEMOP                  > int {  65 }
+macro SYS_SEMCTL                 > int {  66 }
+
+// Directories
+macro SYS_GETCWD                 > int {  79 }
+macro SYS_CHDIR                  > int {  80 }
+macro SYS_FCHDIR                 > int {  81 }
+macro SYS_RENAME                 > int {  82 }
+macro SYS_MKDIR                  > int {  83 }
+macro SYS_RMDIR                  > int {  84 }
+macro SYS_CREAT                  > int {  85 }
+macro SYS_LINK                   > int {  86 }
+macro SYS_UNLINK                 > int {  87 }
+macro SYS_SYMLINK                > int {  88 }
+macro SYS_READLINK               > int {  89 }
+macro SYS_CHMOD                  > int {  90 }
+macro SYS_FCHMOD                 > int {  91 }
+macro SYS_CHOWN                  > int {  92 }
+macro SYS_FCHOWN                 > int {  93 }
+macro SYS_LCHOWN                 > int {  94 }
+
+// Time
+macro SYS_GETTIMEOFDAY           > int {  96 }
+macro SYS_TIME                   > int { 201 }
+macro SYS_CLOCK_GETTIME          > int { 228 }
+
+macro SYS_CLOCK_NANOSLEEP        > int { 230 }
+
+macro SYS_UTIMES                 > int { 235 }
+
+macro stdin  > int { 0 }
+macro stdout > int { 1 }
+macro stderr > int { 2 }
+
+macro putss : ptr int {
+    stdout SYS_WRITE syscall3
+    drop
+}
+
+macro exitt : int {
+    SYS_EXIT syscall1
+    drop
+}

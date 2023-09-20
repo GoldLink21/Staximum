@@ -16,6 +16,7 @@ TokenType :: enum {
     If,
     Eq,
     Gt,
+    Lt,
     Let,
     End,
     Exit,
@@ -32,6 +33,7 @@ TokenType :: enum {
     CParen,
     OBrace,
     CBrace,
+    Import,
     Syscall0,
     Syscall1,
     Syscall2,
@@ -51,6 +53,7 @@ IdentifierTokens : map[string]TokenType = {
     "proc" = .Proc,
     "puts" = .Puts,
     "macro" = .Macro,
+    "import" = .Import,
     "syscall0" = .Syscall0,
     "syscall1" = .Syscall1,
     "syscall2" = .Syscall2,
@@ -59,6 +62,7 @@ IdentifierTokens : map[string]TokenType = {
 // Single char tokens
 SymbolTokens : map[u8]TokenType = {
     '>' = .Gt,
+    '<' = .Lt,
     '=' = .Eq,
     '-' = .Dash,
     '+' = .Plus,
@@ -93,6 +97,7 @@ printToken :: proc(using token:Token) {
         case .Type:     fmt.printf("<Type '%s'>", types.TypeToString[value.(types.Type)])
         case .Eq:       fmt.printf("<=>")
         case .Gt:       fmt.printf("<>>")
+        case .Lt:       fmt.printf("<<>")
         case .Colon:    fmt.printf("<:>")
         case .Plus:     fmt.printf("<+>")
         case .Dash:     fmt.printf("<->")
@@ -109,6 +114,7 @@ printToken :: proc(using token:Token) {
         case .Puts:     fmt.printf("<Puts>")
         case .Proc:     fmt.printf("<Proc>")
         case .Macro:    fmt.printf("<Macro>")
+        case .Import:   fmt.printf("<Import>")
         case .Syscall0: fmt.printf("<Syscall0>")
         case .Syscall1: fmt.printf("<Syscall1>")
         case .Syscall2: fmt.printf("<Syscall2>")

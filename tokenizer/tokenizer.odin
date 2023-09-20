@@ -23,6 +23,16 @@ Tokenizer :: struct {
     oldCol: int,
 }
 
+// Opens file, tokenizes and returns
+tokenizeFile :: proc(fileName: string) -> (output:[dynamic]Token = nil, err:util.ErrorMsg) {
+    textBytes, ok := os.read_entire_file_from_filename(fileName)
+    if !ok {
+        return nil, fmt.tprintf("Could not open file '%s'\n", fileName)
+    }
+    text := string(textBytes)
+    return tokenize(text, fileName)
+}
+
 // Tokenize a string. File is used solely for debugging
 tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, errMsg:util.ErrorMsg) {
     // TODO: Fix up the curT, next, curGood naming to be more clear

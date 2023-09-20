@@ -1,3 +1,7 @@
+import "/path/to/include.stax"
+import <corelib>
+import proc1 proc2 from "library"
+
 // Generate macro with the name Name that takes 
 //  an InputTypes and returns an OutputTypes
 macro Name : InputTypes > OutputTypes {

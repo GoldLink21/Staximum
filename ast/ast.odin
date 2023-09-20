@@ -5,6 +5,7 @@ package ast
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:slice"
 
 import "../tokenizer"
 import "../types"
@@ -39,6 +40,7 @@ AST :: union #no_nil {
 ASTProgram :: struct {
     procs:map[string]^Procedure,
     macros:map[string]^Macro,
+    includedFiles:[dynamic]string,
 }
 
 ASTBlock :: struct {
@@ -55,7 +57,7 @@ resolveTokens :: proc(tokens:[]Token) -> (out:^ASTProgram, err:util.ErrorMsg) {
 }
 
 // Parses the entire program
-resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
+resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (program:^ASTProgram, err:ErrorMsg) {
     program = new(ASTProgram)
     ok : bool
     for cur := curr(tw); curOk(tw); cur,_ = next(tw) {
@@ -142,12 +144,79 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
                     procName, types.typesToString(procc.outputs), types.typesToString(procc.body.outputTypes))
             }
             program.procs[procName] = procc
+        } else if cur.type == .Import {
+            /*
+            A few formats.
+            import "file.stax"
+
+            These will be supported later
+            import <corelib>
+            import proc1 proc2 from "library"
+            import proc1 proc2 from <corelib>
+            */
+            fileNameStr, ok := tryNext(tw, .StringLit)
+            if ok {
+                fileName := fileNameStr.value.(string)
+                // Import file and either insert tokens or parsed AST
+                fmt.printf("Trying to import '%s'\n", fileName)
+                if slice.contains(includedFiles[:], fileName) {
+                    // Already included, so ignore
+                    fmt.printf("Already Included\n")
+                    continue
+                }
+                // Check for file existance
+                if !os.exists(fileName) {
+                    return program, util.locStr(fileNameStr.loc, 
+                        "File '%s' does not exist\n", fileName)
+                }
+                append(&program.includedFiles, fileName)
+
+                newTokens := tokenizer.tokenizeFile(fileName) or_return
+                tw2 : TokWalk = { newTokens[:], 0, {} }
+                newProgram := resolveProgram(&tw2, program.includedFiles) or_return
+                // Add new procedures
+                for prNm, procc in newProgram.procs {
+                    // Make sure its a fresh name
+                    nameExistsErr(prNm, program) or_return
+                    // Move over to current scope
+                    program.procs[prNm] = procc
+                }
+                // Add new macros
+                for macName, macro in newProgram.macros {
+                    // Make sure its a fresh name
+                    nameExistsErr(macName, program) or_return
+                    // Move over to current scope
+                    program.macros[macName] = macro
+                }
+            } else {
+                return program, "Import not implemented\n"
+            }
         } else {
+            // TODO: Global vars
             return program, util.locStr(cur.loc, 
                 "Global scope can only include macro and proc statements")
         }
     }
     return program, nil
+}
+
+// Places a variable can be defined
+NameLocs :: enum {
+    Macro, Proc, Var
+}
+
+nameExists :: proc(name:string, program:^ASTProgram) -> NameLocs {
+    if name in program.macros do return .Macro
+    if name in program.procs do return .Proc
+    return nil
+}
+
+nameExistsErr ::  proc(name:string, program:^ASTProgram) -> ErrorMsg {
+    if name in program.macros do return fmt.tprintf(
+        "Redeclaration of macro '%s'\n", name)
+    if name in program.procs do return fmt.tprintf(
+        "Redeclaration of proc '%s'\n", name)
+    return nil
 }
 
 typesMatch :: proc(ts1, ts2:[dynamic]Type) -> bool {
@@ -331,6 +400,9 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         case .Gt: { 
             return false, "> AST TODO"
         }
+        case .Lt: { 
+            return false, "< AST TODO"
+        }
         case .If: { 
             return false, "< AST TODO"
         }
@@ -378,7 +450,6 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 free(newBody.(^ASTBlock))
                 // Place output types
                 for out in mac.outputs {
-                    // fmt.printf("Adding type %s\n", out)
                     append(ts, out)
                 }
                 next(tw)
@@ -449,6 +520,9 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         case .Proc: {
             return false, "Cannot have a proc outside the global scope\n"
         }
+        case .Import: {
+            return false, "Cannot `import` outside of global scope"
+        }
     }
     next(tw)
     return false, nil
@@ -483,15 +557,7 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
         case ^ASTInputParam: {
             if type.from != name do return
             // Replace with stuff from curAST
-            sb : strings.Builder
-            printASTHelper(curAST[len(curAST) - numInputs + type.index], &sb, false, 1)
-            fmt.printf("Replacing input %d{{\n%s\n}\n", type.index, strings.to_string(sb))
-            
             block ^= curAST[len(curAST) - numInputs + type.index]
-            strings.builder_reset(&sb)
-            printASTHelper(block^, &sb, false, 1)
-            fmt.printf("Became {{\n%s\n}\n", strings.to_string(sb))
-            
         }
         case ^ASTBinOp:{
             replaceInputsWithVals(&type.lhs, name, curAST, numInputs)
@@ -611,6 +677,12 @@ resolveDash :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, dash:Token) -> (op:
 }
 
 resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Variable, program:^ASTProgram) -> (var:^ASTVarDef=nil,err:ErrorMsg) {
+    /*
+    Formats
+    let <ident> = {<Block with 1 return>}
+    let <ident> = <AST>
+
+    */
     ident, ok := peek(tw)
     if !ok {
         // Reached end of input
@@ -625,6 +697,7 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Va
         return nil, util.locStr(curr(tw).loc, 
             "Redeclaration of var '%s'", varName)
     }
+    // TODO: Check if name exists in procedures and macros
     // Eat = after
     eq := expectNext(tw, .Eq) or_return
     nextT, ok2 := next(tw)
