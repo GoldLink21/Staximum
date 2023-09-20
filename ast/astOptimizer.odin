@@ -2,36 +2,32 @@ package ast
 
 import "core:fmt"
 
-
-optimizeAST :: proc(input:[dynamic]AST, state:^ASTState) -> ([dynamic]AST) {
-    for changedSomething := true; changedSomething; {
-        // Run again if something was optimized
-        changedSomething = false
-        for _,idx in input {
-            changedSomething ||= optimizeASTHelp(&input[idx], state)
-        }
-    }
-    return input
-}
-
 optimizeASTProgram :: proc(program: ^ASTProgram) -> ^ASTProgram {
     // TODO:
     for _, mac in program.macros {
-        optimizeASTBlock(mac.body)
+        optimizeASTBlock(mac.body, true)
     }
     for _, pr in program.procs {
-        optimizeASTBlock(pr.body)
+        optimizeASTBlock(pr.body, true)
     }
     return program
 }
 
-optimizeASTBlock :: proc(block:^ASTBlock) -> ^ASTBlock {
+optimizeASTBlock :: proc(block:^ASTBlock, isProc:=false) -> AST {
     rerun := true
     for rerun {
         rerun = false
         for &node in block.nodes {
             rerun ||= optimizeASTHelp(&node, &block.state)
         }
+    }
+    // Unwind single element blocks?
+    if len(block.nodes) == 1 && !isProc {
+        // Can replace with just the individual node
+        return block.nodes[0]
+    }
+    if len(block.nodes) == 0 && !isProc {
+        // Can just remove
     }
     return block
 }
@@ -123,16 +119,16 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
                 optimizeASTHelp(&type.arg3, state)
         }
         case ^ASTBlock: {
-            for &node in type.nodes {
-                changedSomething ||= optimizeASTHelp(&node, state)
-            }
-            // Remove unused vars
+            ast ^= optimizeASTBlock(type)
         }
         case ^ASTVarDef: {
             changedSomething ||= optimizeASTHelp(&type.value, state)
         }
+        case ^ASTDrop: {
+            changedSomething ||= optimizeASTHelp(&type.value, state)
+        }
         // No optimizations
-        case ^ASTPushLiteral, ^ASTDrop, ^ASTVarRef: {}
+        case ^ASTPushLiteral, ^ASTVarRef, ^ASTInputParam, ^ASTProcCall: {}
     }
     return changedSomething
 }

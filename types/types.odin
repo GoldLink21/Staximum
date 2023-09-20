@@ -2,6 +2,7 @@
 package types
 
 import "core:fmt"
+import "core:strings"
 
 Type :: enum u8 {
     Any,
@@ -29,4 +30,15 @@ StringToType : map[string]Type = {
     "float" = .Float,
     "string" = .String,
     "cstring" = .CString,
+}
+
+typesToString :: proc(types:[dynamic]Type) -> string {
+    sb : strings.Builder
+    strings.write_string(&sb, "[ ")
+    for t, i in types {
+        strings.write_string(&sb, TypeToString[t])
+        if i != len(types) - 1 do strings.write_string(&sb, ", ")
+    }
+    strings.write_string(&sb, " ]")
+    return strings.to_string(sb)
 }

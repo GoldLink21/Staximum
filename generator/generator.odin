@@ -3,11 +3,17 @@ package generator
 
 import "../tokenizer"
 import "../ast"
+import "../util"
 import "core:os"
 import "core:fmt"
 import "core:strings"
 
+ASM_COMMENTS :: true
+ErrorMsg :: util.ErrorMsg
+
 // TODO convert to have string error messages
+
+paramRegs : []string = {"rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"}
 
 // Stores the state of the ASM as its generated
 ASMContext :: struct {
@@ -31,42 +37,28 @@ generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
 generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     sb: strings.Builder
     strings.write_string(&sb, 
-        "   section .text\nglobal _start\n_start:\n   jmp main\n")
+        "   section .text\nglobal _start\n_start:\n   call main\n")
+    // Exit with 0
+    comment(&sb, "Safe exit")
+    strings.write_string(&sb, "   mov rax, 60\n   mov rdi, 0\n   syscall\n")
+    
+    ctx := new(ASMContext)
+    ctx.floatLits = make(map[f64]string)
+    ctx.stringLits = make(map[string]string)
+    ctx.vars = make(map[string]ast.Variable)
     
     for name,pr in program.procs {
+        // TODO: Conform to some calling convention
+        fmt.printf("Generating Proc %s\n", name)
         strings.write_string(&sb,name)
         strings.write_string(&sb, ":\n")
         a : ast.AST = pr.body
-        generateNasmFromASTHelp(&sb, {}, &a)
+        generateNasmFromASTHelp(&sb, ctx, &a)
+        strings.write_string(&sb, "   ret\n")
     }
+    generateDataSection(&sb, ctx)
+    generateBSSSection(&sb, ctx)
 
-    return strings.to_string(sb)
-}
-
-generateNasmFromASTBlock :: proc(block : ^ast.ASTBlock) -> string {
-    sb : strings.Builder
-    strings.write_string(&sb, "   section .text\nglobal _start\n_start:\n")
-    
-    vars := block.state.vars
-
-    ctx : ASMContext = {
-        make(map[string]string),
-        make(map[f64]string),
-        vars,
-    }
-    for k, &v in block.state.vars {
-        ctx.vars[k] = {
-
-        }
-    }
-
-    for &a in block.nodes {
-        generateNasmFromASTHelp(&sb, &ctx, &a)
-    }
-    strings.write_string(&sb, "\n   ; Safe exit if it makes it to the end\n   mov rax, 60\n   mov rdi, 0\n   syscall\n")
-    generateDataSection(&sb, &ctx)
-    
-    generateBSSSection(&sb, &ctx)
     return strings.to_string(sb)
 }
 
@@ -85,18 +77,22 @@ getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
     return ctx.floatLits[flt]
 }
 
-generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST) {
+generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST, inDrop:=false) -> (didDrop:bool = false) {
     using ast
     switch ty in as {
         case ^ASTPushLiteral: {
             switch litType in ty {
                 case int: {
+                    // Ignore push int if dropped
+                    if inDrop do return true
                     fmt.sbprintf(sb, "   push %d\n", litType)
                 }
                 case f64: {
                     assert(false, "TODO")
                 }
                 case bool: {
+                    // Ignore push int if dropped
+                    if inDrop do return true
                     fmt.sbprintf(sb, "   push %d\n", int(litType))
                 }
                 case string: {
@@ -128,14 +124,22 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         case ^ASTSyscall0: {
             shortcutLit(sb, ctx,
                 &ty.call, "rax")
-            nasm(sb, "syscall")
+            nasm(sb, "syscall ; 0 args")
+            if inDrop {
+                return true
+            }        
             pushReg(sb, "rax")
         }
         case ^ASTSyscall1: {
             shortcutLits(sb, ctx,
                 &ty.arg1, "rdi", 
                 &ty.call, "rax")
-            nasm(sb, "syscall")
+            nasm(sb, "syscall ; 1 arg")
+            if inDrop {
+                comment(sb, "Dropped push rax")
+
+                return true
+            }        
             pushReg(sb, "rax")
         }
         case ^ASTSyscall2: {
@@ -144,7 +148,12 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 {&ty.call, "rax"},
                 {&ty.arg1, "rdi"},
                 {&ty.arg2, "rsi"})
-            nasm(sb, "syscall")
+            nasm(sb, "syscall ; 2 args")
+            if inDrop {
+                comment(sb, "Dropped push rax")
+
+                return true
+            }        
             pushReg(sb, "rax")
         }
         case ^ASTSyscall3: {
@@ -153,7 +162,11 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 {&ty.arg1, "rdi"},
                 {&ty.arg2, "rsi"},
                 {&ty.arg3, "rdx"})
-            nasm(sb, "syscall")
+            nasm(sb, "syscall ; 3 args")
+            if inDrop {
+                comment(sb, "Dropped push rax")
+                return true
+            }
             pushReg(sb, "rax")
         }
         case ^ASTBlock: {
@@ -163,7 +176,11 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         }
         case ^ASTDrop: {
             // Move the stack pointer back to ignore the value that was there
-            nasm(sb, "add rsp,8")
+            if !generateNasmFromASTHelp(sb, ctx, &ty.value, true) {
+                // Was not able to shortcut the drop
+                comment(sb, "Drop")
+                nasm(sb, "add rsp,8")
+            }
         }
         case ^ASTVarRef: {
             // TODO
@@ -172,7 +189,22 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         case ^ASTVarDef: {
             assert(false, "TODO asm vardef\n")
         }
+        case ^ASTInputParam: {
+            when true do assert(false, "ASM Input params for procs")
+            if ty.index < len(paramRegs) {
+                // Use register to call
+                comment(sb, "Input param %d", ty.index)
+                pushReg(sb, paramRegs[ty.index])
+                return
+            }
+            assert(false, "TODO asm input param after 5\n")
+        }
+        case ^ASTProcCall: {
+            // Load registers in order 
+            assert(false, "TODO: AST proc call\n")
+        }
     }
+    return false
 }
 
 loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^ast.ASTPushLiteral) {
@@ -241,6 +273,7 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
     // Values that can be loaded directly are done after
     indiciesForLoad := make([dynamic]int)
     defer delete(indiciesForLoad)
+    // Check for literals
     for asReg, i in rest {
         _, isLiteral := asReg.ast.(^ast.ASTPushLiteral)
         if isLiteral {
@@ -251,19 +284,20 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
             generateNasmFromASTHelp(sb, ctx, asReg.ast)
         }
     }
+    // Tracks which index in the indicies for load to use
     loadIndex := 0
     for i in 0..<len(rest) {
         // In bounds and needs indexing
         if loadIndex < len(indiciesForLoad) && indiciesForLoad[loadIndex] == i {
             // Should be safe to do
-            lit := rest[i].ast.(^ast.ASTPushLiteral)
+            lit, wasLit := rest[i].ast.(^ast.ASTPushLiteral)
+            //assert(wasLit, "Did not find literal value?")
             loadRegWithLit(sb, ctx, rest[i].reg, lit)
             loadIndex += 1
         } else {
             popReg(sb, rest[i].reg)
         }
     }
-
 }
 
 // Adds an indented instruction with a newline
@@ -307,6 +341,7 @@ pushReg :: proc(sb: ^strings.Builder, reg:string, isFloat := false) {
 }
 
 generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
+    fmt.printf("Generating Data\n")
     // Nothing to add
     if len(ctx.stringLits) == 0 do return
     strings.write_byte(sb, '\n')
@@ -319,6 +354,14 @@ generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
         // strings.write_string(sb, k)
         // strings.write_string(sb, "\',10\n")
         // Should I preload their lengths too?
+    }
+}
+
+comment :: proc(sb:^strings.Builder, msg:string, params:..any) {
+    when ASM_COMMENTS {
+        strings.write_string(sb, "; ")
+        fmt.sbprintf(sb, msg, ..params)
+        strings.write_byte(sb, '\n')
     }
 }
 

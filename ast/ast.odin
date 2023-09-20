@@ -21,6 +21,7 @@ ASTState :: struct {
 
 AST :: union #no_nil {
     ^ASTPushLiteral,
+    ^ASTInputParam,
     ^ASTUnaryOp,
     ^ASTBinOp,
     ^ASTSyscall0,
@@ -31,12 +32,11 @@ AST :: union #no_nil {
     ^ASTBlock,
     ^ASTVarRef,
     ^ASTVarDef,
+    ^ASTProcCall,
 }
 
 // Full program here
-//  TODO: Switch resolveTokens to return this
 ASTProgram :: struct {
-    main:^ASTBlock,
     procs:map[string]^Procedure,
     macros:map[string]^Macro,
 }
@@ -48,7 +48,6 @@ ASTBlock :: struct {
     outputTypes:[dynamic]Type
 }
 
-// TODO: Switch to return ASTProgram
 resolveTokens :: proc(tokens:[]Token) -> (out:^ASTProgram, err:util.ErrorMsg) {
     tw : TokWalk = { tokens, 0, {} }
     program := resolveProgram(&tw) or_return
@@ -64,7 +63,9 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
             macro := new(Macro)
             macro.inputs  = make([dynamic]Type)
             macro.outputs = make([dynamic]Type)
-            
+
+            inputAST : [dynamic]AST = nil
+            defer delete(inputAST)
             // Eat 'macro'
             cur, ok = next(tw)
             if !ok { return program, "Expected Identifier\n" }
@@ -84,7 +85,7 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
             }
             // :
             _, ok  = tryNext(tw, .Colon)
-            if ok do resolveTypes(tw, &macro.inputs)
+            if ok do inputAST = resolveTypes(tw, &macro.inputs, macroName, true)
             // >
             _, ok = tryNext(tw, .Gt)
             if ok do resolveTypes(tw, &macro.outputs)
@@ -94,19 +95,21 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
                 "Expected an '{{' to start ")
             // Eat {
             next(tw)
-            macro.body = resolveBlock(tw, program, {}) or_return
-            /*
-            if len(macro.body.outputTypes) != len(macro.outputs) {
+            macro.body = resolveBlock(tw, program, {}, macro.inputs, inputAST) or_return
+            if !typesMatch(macro.body.outputTypes, macro.outputs) {
                 return program, util.locStr(macro.defLoc, 
-                    "Got the incorrect amount of return value than expected for macro %s",
-                    macroName)
-            }*/
+                    "Return type signature of %s did not match actual returns.\nExpected: %s\nGot: %s",
+                        macroName, types.typesToString(macro.outputs), types.typesToString(macro.body.outputTypes))
+            }
             program.macros[macroName] = macro
         } else if cur.type == .Proc {
             procc := new(Procedure)
             procc.inputs  = make([dynamic]Type)
             procc.outputs = make([dynamic]Type)
             
+            inputAST : [dynamic]AST = nil
+            defer delete(inputAST)
+
             // Eat 'macro'
             cur, ok = next(tw)
             if !ok { return program, "Expected Identifier\n" }
@@ -122,7 +125,7 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
             }
             // :
             _, ok  = tryNext(tw, .Colon)
-            if ok do resolveTypes(tw, &procc.inputs)
+            if ok do inputAST = resolveTypes(tw, &procc.inputs, procName, true)
             // >
             _, ok = tryNext(tw, .Gt)
             if ok do resolveTypes(tw, &procc.outputs)
@@ -132,7 +135,12 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
                 "Expected an '{{' to start ")
             // Eat {
             next(tw)
-            procc.body = resolveBlock(tw, program, {}) or_return
+            procc.body = resolveBlock(tw, program, {}, procc.inputs, inputAST) or_return
+            if !typesMatch(procc.body.outputTypes, procc.outputs) {
+                return program, util.locStr(procc.defLoc, 
+                    "Return type signature of %s did not match actual returns.\nExpected: %s\nGot: %s",
+                    procName, types.typesToString(procc.outputs), types.typesToString(procc.body.outputTypes))
+            }
             program.procs[procName] = procc
         } else {
             return program, util.locStr(cur.loc, 
@@ -142,16 +150,42 @@ resolveProgram :: proc(tw:^TokWalk) -> (program:^ASTProgram, err:ErrorMsg) {
     return program, nil
 }
 
-// Reads all the next type tokens and puts them into the given buffer
-resolveTypes :: proc(tw:^TokWalk, out :^[dynamic]Type) {
-    for type, hasType := tryNext(tw, .Type); hasType; type, hasType = tryNext(tw, .Type) {
-        append(out, type.value.(types.Type))
+typesMatch :: proc(ts1, ts2:[dynamic]Type) -> bool {
+    if len(ts1) != len(ts2) do return false
+    for _, i in ts1 {
+        if ts1[i] != ts2[i] do return false
     }
+    return true
 }
 
-resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variable) -> (block:^ASTBlock, err:ErrorMsg) {
+
+// Reads all the next type tokens and puts them into the given buffer
+resolveTypes :: proc(tw:^TokWalk, out :^[dynamic]Type, name:string="", genAST := false) -> (output:[dynamic]AST = nil) {
+    if genAST do output = make([dynamic]AST)
+    i := 0
+    for type, hasType := tryNext(tw, .Type); hasType; type, hasType = tryNext(tw, .Type) {
+        append(out, type.value.(types.Type))
+        if genAST {
+            input := new(ASTInputParam)
+            input.type = type.value.(types.Type)
+            input.index = i
+            input.from = name
+            append(&output, input)
+            i += 1
+        }
+    }
+    return output
+}
+
+resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variable, inTypes:[dynamic]Type, inAST:[dynamic]AST) -> (block:^ASTBlock, err:ErrorMsg) {
     block = new(ASTBlock)
     block.nodes = make([dynamic]AST)
+    // Import astNodes
+    if inAST != nil {
+        for a in inAST {
+            append(&block.nodes, a)
+        }
+    }
     block.state = {
         make(map[string]Variable)
     }
@@ -159,6 +193,11 @@ resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variabl
         block.state.vars[k] = v
     }
     block.outputTypes = make([dynamic]Type)
+    if inTypes != nil {
+        for it in inTypes {
+            append(&block.outputTypes, it)
+        }
+    }
     // Type stack
     ts := &block.outputTypes
     out := &block.nodes
@@ -213,12 +252,12 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 {.Int}, cur.loc) or_return
             // Break even
             // popType()
-            // pushType(.Int)
+            pushType(ts, .Int)
 
             value := new(ASTSyscall1)
             value.call = new(ASTPushLiteral)
             value.call.(^ASTPushLiteral) ^= SYS_EXIT
-            value.arg1 = pop(curAST)
+            value.arg1 = popNoDrop(curAST)
             append(curAST, value)
             // Consider dropping after exit calls cause value will never be used
             // append(&out, new(Drop))
@@ -228,7 +267,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 {.Int}, cur.loc) or_return
             pushType(ts, .Int)
             value := new(ASTSyscall0)
-            value.call = pop(curAST)
+            value.call = popNoDrop(curAST)
             append(curAST, value)
         }
         case .Syscall1: {
@@ -236,8 +275,8 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 {.Int, .Any}, cur.loc) or_return
             pushType(ts, .Int)
             value := new(ASTSyscall1)
-            value.call = pop(curAST)
-            value.arg1 = pop(curAST)
+            value.call = popNoDrop(curAST)
+            value.arg1 = popNoDrop(curAST)
             append(curAST, value)
         }
         case .Syscall2: {
@@ -245,9 +284,9 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 {.Int, .Any, .Any}, cur.loc) or_return
             pushType(ts, .Int)
             value := new(ASTSyscall2)
-            value.call = pop(curAST)
-            value.arg1 = pop(curAST)
-            value.arg2 = pop(curAST)
+            value.call = popNoDrop(curAST)
+            value.arg1 = popNoDrop(curAST)
+            value.arg2 = popNoDrop(curAST)
             append(curAST, value)
         }
         case .Syscall3: { 
@@ -255,26 +294,28 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 {.Int, .Any, .Any, .Any}, cur.loc) or_return
             pushType(ts, .Int)
             value := new(ASTSyscall3)
-            value.call = pop(curAST)
-            value.arg1 = pop(curAST)
-            value.arg2 = pop(curAST)
-            value.arg3 = pop(curAST)
+            value.call = popNoDrop(curAST)
+            value.arg1 = popNoDrop(curAST)
+            value.arg2 = popNoDrop(curAST)
+            value.arg3 = popNoDrop(curAST)
             append(curAST, value)
         }
         case .Drop: {
             expectArgs(curAST^, ts, "drop", {.Any}, cur.loc) or_return
-            popType(ts)
-            append(curAST, new(ASTDrop))
+            drop := new(ASTDrop)
+            // Grab last item that wasn't a drop
+            drop.value = popNoDrop(curAST)
+            append(curAST, drop)
         }
         case .Macro: {
-            // macro := resolveMacro(tw) or_return
-            
-            return false, "TODO"
+            return false, util.locStr(cur.loc, 
+                "Macro is not supported outside global scope")
         }
         case .Puts: {
             // Should this instead become a proc?
             expectArgs(curAST^, ts, "puts", 
                 {.Ptr, .Int}, cur.loc) or_return
+            pushType(ts, .Int)
 
             value := new(ASTSyscall3)
             value.call = new(ASTPushLiteral)
@@ -283,8 +324,8 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             value.arg1 = new(ASTPushLiteral)
             value.arg1.(^ASTPushLiteral) ^= 1
 
-            value.arg2 = pop(curAST)
-            value.arg3 = pop(curAST)
+            value.arg2 = popNoDrop(curAST)
+            value.arg3 = popNoDrop(curAST)
             append(curAST, value)
         }
         case .Gt: { 
@@ -328,16 +369,27 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 mac : ^Macro = program.macros[varName]
                 // Check input types
                 expectTypes(ts, mac.inputs[:], cur.loc) or_return
-                // Replace with body
-                append(curAST, mac.body)
+                newBody := AST(mac.body)
+                newBody = cloneAST(&newBody)
+                replaceInputsWithVals(&newBody, varName, curAST, len(mac.inputs), true) 
+                for n in newBody.(^ASTBlock).nodes {
+                    append(curAST, n)
+                }
+                free(newBody.(^ASTBlock))
                 // Place output types
                 for out in mac.outputs {
+                    // fmt.printf("Adding type %s\n", out)
                     append(ts, out)
                 }
                 next(tw)
                 return false, nil
             } else if varName in program.procs {
                 // Procedure
+                // Need to pop args into appropriate registers
+                call := new(ASTProcCall)
+                call.ident = varName
+                call.nargs = len(program.procs[varName].inputs)
+                append(curAST, call)
             }
             return false, util.locStr(cur.loc, 
                 "Unknown token of '%s'", varName)
@@ -352,12 +404,13 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
 
                 // Ignore if casting to the same type
                 if peekType(ts) == typeValue do return {}, nil
+                // Cast Int to float
                 if peekType(ts) == .Int && typeValue == .Float {
                     popType(ts)
                     pushType(ts, .Float)
                     unop := new(ASTUnaryOp)
                     unop.op = .CastIntToFloat
-                    unop.value = pop(curAST)
+                    unop.value = popNoDrop(curAST)
                     append(curAST, unop)
                     next(tw)
                     return
@@ -367,7 +420,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                     pushType(ts, .Int)
                     unop := new(ASTUnaryOp)
                     unop.op = .CastFloatToInt
-                    unop.value = pop(curAST)
+                    unop.value = popNoDrop(curAST)
                     append(curAST, unop)
                     next(tw)
                     return
@@ -381,9 +434,12 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         }
         case .OBrace: {
             next(tw)
-            block := resolveBlock(tw, program, vars^) or_return
+            block := resolveBlock(tw, program, vars^, nil, nil) or_return
             // Make sure the block is not empty
             if len(block.nodes) > 0 {
+                for t in block.outputTypes {
+                    pushType(ts, t)
+                }
                 append(curAST, block)
             }
         }
@@ -398,6 +454,93 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
     return false, nil
 }
 
+// Grabs next element that isn't a drop
+popNoDrop :: proc(curAST:^[dynamic]AST) -> AST {
+    for i := len(curAST) - 1; i >= 0; i -= 1 {
+        node, isDrop := curAST[i].(^ASTDrop)
+        if !isDrop {
+            returnElem := curAST[i]
+            // Remove then return
+            ordered_remove(curAST, i)
+            return returnElem
+        }
+    }
+    panic("Check your lengths\n")
+}
+
+printASTList :: proc(ast:^[dynamic]AST){
+    sb : strings.Builder
+    for a in ast {
+        printASTHelper(a, &sb)
+    }
+    fmt.printf("%s\n", strings.to_string(sb))
+}
+
+// Used for macros
+replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, numInputs:int, isRoot:=false){
+    if numInputs == 0 do return
+    switch &type in block^ {
+        case ^ASTInputParam: {
+            if type.from != name do return
+            // Replace with stuff from curAST
+            sb : strings.Builder
+            printASTHelper(curAST[len(curAST) - numInputs + type.index], &sb, false, 1)
+            fmt.printf("Replacing input %d{{\n%s\n}\n", type.index, strings.to_string(sb))
+            
+            block ^= curAST[len(curAST) - numInputs + type.index]
+            strings.builder_reset(&sb)
+            printASTHelper(block^, &sb, false, 1)
+            fmt.printf("Became {{\n%s\n}\n", strings.to_string(sb))
+            
+        }
+        case ^ASTBinOp:{
+            replaceInputsWithVals(&type.lhs, name, curAST, numInputs)
+            replaceInputsWithVals(&type.rhs, name, curAST, numInputs)
+        }
+        case ^ASTBlock:{
+            for &node in type.nodes {
+                replaceInputsWithVals(&node, name, curAST, numInputs)
+            }
+        }
+        case ^ASTSyscall0: {
+            replaceInputsWithVals(&type.call, name, curAST, numInputs)
+        }
+        case ^ASTSyscall1:{
+            replaceInputsWithVals(&type.call, name, curAST, numInputs)
+            replaceInputsWithVals(&type.arg1, name, curAST, numInputs)
+        }
+        case ^ASTSyscall2:{
+            replaceInputsWithVals(&type.call, name, curAST, numInputs)
+            replaceInputsWithVals(&type.arg1, name, curAST, numInputs)
+            replaceInputsWithVals(&type.arg2, name, curAST, numInputs)
+        }
+        case ^ASTSyscall3:{
+            replaceInputsWithVals(&type.call, name, curAST, numInputs)
+            replaceInputsWithVals(&type.arg1, name, curAST, numInputs)
+            replaceInputsWithVals(&type.arg2, name, curAST, numInputs)
+            replaceInputsWithVals(&type.arg3, name, curAST, numInputs)
+        }
+        case ^ASTUnaryOp:{
+            replaceInputsWithVals(&type.value, name, curAST, numInputs)
+        }
+        case ^ASTVarDef:{
+            replaceInputsWithVals(&type.value, name, curAST, numInputs)
+        }
+        case ^ASTDrop:{
+            replaceInputsWithVals(&type.value, name, curAST, numInputs)
+        }
+        // No traversal
+        case ^ASTPushLiteral, ^ASTVarRef, ^ASTProcCall: {}
+
+    }
+    if isRoot {
+        // Pop off number of args from input AST
+        for i in 0..<numInputs {
+            pop(curAST)
+        }
+    }
+}
+
 resolveIntLit :: proc(ts:^[dynamic]Type, intLit:Token) -> (^ASTPushLiteral, util.ErrorMsg) {
     if intLit.type != .IntLit do return nil, util.locStr(intLit.loc,
         "Invalid token type for an Int Lit")
@@ -406,19 +549,17 @@ resolveIntLit :: proc(ts:^[dynamic]Type, intLit:Token) -> (^ASTPushLiteral, util
     return value, nil
 }
 
-// Handle setting up "string lit" AST 
+// Handle setting up "string lit" AST. Pushes types onto type stack
 resolveStringLit :: proc(ts:^[dynamic]Type, strLit:Token) -> (^ASTPushLiteral, ^ASTPushLiteral, ErrorMsg) {
     // Length
     length := new(ASTPushLiteral)
     length ^= len(strLit.value.(string))
     pushType(ts, .Int)
-    // append(out, length)  
 
     // Label
     value := new(ASTPushLiteral)
     value ^= strLit.value.(string)
     pushType(ts, .Ptr)
-    // append(out, value) 
     return length, value, nil
 }
 
@@ -495,7 +636,7 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Va
     if nextT.type == .OBrace {
         // Eat {
         next(tw)
-        block := resolveBlock(tw, program, vars^) or_return
+        block := resolveBlock(tw, program, vars^, nil, nil) or_return
         if len(block.outputTypes) != 1 {
             return nil, util.locStr(nextT.loc, 
                 "Setting variables to a block requires one output type")
@@ -574,7 +715,22 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                 }
                 case string: {
                     strings.write_byte(sb, '"')
-                    strings.write_string(sb, lit)
+                    // Escape characters
+                    for c in lit {
+                        if c == '\n' {
+                            strings.write_string(sb, "\\n")
+                        } else if c == '\r' {
+                            strings.write_string(sb, "\\r")
+                        } else if c == '\t' {
+                            strings.write_string(sb, "\\t")
+                        } else if c == '"' {
+                            strings.write_string(sb, "\\\"")
+                        } else if c == 0 {
+                            strings.write_string(sb, "\\0")
+                        } else {
+                            strings.write_byte(sb, u8(c))
+                        }
+                    }
                     strings.write_byte(sb, '"')
                 }
                 case f64: {
@@ -584,6 +740,10 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             // Handle closing here because its different
             if inList do strings.write_byte(sb, ',')
             strings.write_byte(sb, '\n')
+            return
+        }
+        case ^ASTInputParam: {
+            fmt.sbprintf(sb, "Input%d from %s '%s'\n", ty.index, ty.from, ty.type)
             return
         }
         case ^ASTBinOp: {
@@ -622,12 +782,20 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             printASTHelper(ty.arg3, sb, false, indent + 1)
         }
         case ^ASTDrop: {
+            /*
+            // Remove last spaces
+            for i in 0..<indent do strings.pop_byte(sb)
+            printASTHelper(ty.value, sb, true, indent)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
             strings.write_string(sb, "Drop\n")
+            return 
+            */
+            strings.write_string(sb, "drop {\n")
+            printASTHelper(ty.value, sb, true, indent + 1)
+
         }
         case ^ASTVarRef: {
-            strings.write_string(sb, "Ref \"")
-            strings.write_string(sb, ty.ident)
-            strings.write_string(sb, "\"\n")
+            fmt.sbprintf(sb, "Ref \"%s\"\n", ty.ident)
             return
         }
         case ^ASTBlock: {
@@ -637,12 +805,14 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             }
         }
         case ^ASTVarDef: {
-            strings.write_string(sb, "let ")
-            strings.write_string(sb, ty.ident)
-            strings.write_string(sb, " =")
+            fmt.sbprintf(sb, "let %s =", ty.ident)
             // Same indent because we want it to be indented 1 level in block
             printASTHelper(ty.value, sb, false, indent)
             // No closing }
+            return
+        }
+        case ^ASTProcCall: {
+            fmt.sbprintf(sb, "%s(%d args)\n", ty.ident, ty.nargs)
             return
         }
     }
