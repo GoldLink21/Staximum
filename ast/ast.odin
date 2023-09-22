@@ -20,7 +20,7 @@ ASTState :: struct {
     vars: map[string]Variable,
 }
 
-AST :: union #no_nil {
+AST :: union {
     ^ASTPushLiteral,
     ^ASTInputParam,
     ^ASTUnaryOp,
@@ -34,6 +34,7 @@ AST :: union #no_nil {
     ^ASTVarRef,
     ^ASTVarDef,
     ^ASTProcCall,
+    ^ASTIf,
 }
 
 // Full program here
@@ -272,14 +273,20 @@ resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variabl
     out := &block.nodes
     vars := &block.state.vars
     for curOk(tw) {
-        if resolveNextToken(tw, ts, program, vars, out) or_return  {
+        // ret := 
+        if .Block in (resolveNextToken(tw, ts, program, vars, out) or_return) {
             return block, nil
         }
     }
     return block, "Reached end of input without closing block\n"
 }
 
-resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (exitBlock := false, err:ErrorMsg=nil){
+BreakCodes :: bit_set[enum {
+    Block,
+    If,
+}]
+
+resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (exitBlock : BreakCodes = {}, err:ErrorMsg=nil){
     if !curOk(tw) do return {}, "Expected next token, but had nothing"
     cur := curr(tw)
     switch cur.type {
@@ -377,7 +384,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             append(curAST, drop)
         }
         case .Macro: {
-            return false, util.locStr(cur.loc, 
+            return {}, util.locStr(cur.loc, 
                 "Macro is not supported outside global scope")
         }
         case .Puts: {
@@ -398,32 +405,72 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             append(curAST, value)
         }
         case .Gt: { 
-            return false, "> AST TODO"
+            return {}, "> AST TODO\n"
         }
         case .Lt: { 
-            return false, "< AST TODO"
+            return {}, "< AST TODO\n"
         }
         case .If: { 
-            return false, "< AST TODO"
+            // Parse Tokens until you get {
+            iff := new(ASTIf)
+            iff.elseBlock = nil
+            next(tw)
+            iff.cond = resolveIfCond(tw, ts, program, vars, curAST) or_return
+            // Set up what the jump type for the if is
+            #partial switch condType in iff.cond {
+                case ^ASTBinOp: {
+                    #partial switch condType.op {
+                        // Plus, Minus, Eq, Ne, Lt,Gt 
+                        case .Eq: iff.jumpType = .Eq
+                        case .Ne: iff.jumpType = .Ne
+                        case .Lt: iff.jumpType = .Lt
+                        case .Gt: iff.jumpType = .Gt
+                        case: return {}, 
+                            "Invalid binary expression for if statement"
+                    }
+                }
+                case ^ASTPushLiteral:{
+                    // Should always be of type bool
+                    fmt.printf("Push Literal\n")
+                    printAST(condType)
+                    b := condType.(bool)
+                    iff.jumpType = .Eq
+                }
+                case:{
+                    return {}, "Invalid type for ending if statement\n"
+                }
+            }
+            resolveNextToken(tw, ts, program, vars, curAST) or_return
+            iff.body = pop(curAST)
+            append(curAST, iff)
+            // Check for else
+            if curr(tw).type == .Else {
+                // Eat 'else'
+                next(tw)
+                resolveNextToken(tw, ts, program, vars, curAST) or_return
+                iff.elseBlock = pop(curAST)
+            }
+            // tokenizer.printToken(curr(tw))
+            return {}, nil
         }
         case .Eq: {
-            return false, "= AST TODO"
+            return {}, "= AST TODO"
         }
         case .End: { 
-            return false, "end AST TODO"
+            return {}, "end AST TODO"
         }
         case .Let: { 
             letDef := resolveLet(cur.loc, tw, vars, program) or_return
             append(curAST, letDef)
         }
         case .Bang: { 
-            return false, "! AST TODO"
+            return {}, "! AST TODO"
         }
         case .Type: { 
-            return false, "(type) AST TODO"
+            return {}, "(type) AST TODO"
         }
         case .Colon: { 
-            return false, ": AST TODO"
+            return {}, ": AST TODO"
         }
         case .Ident: {
             // raw ident should give the value from variable
@@ -435,7 +482,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 pushType(ts, vars[varName].type)
                 (&vars[varName]).used = true
                 append(curAST, varRef)
-                return false, nil
+                return {}, nil
             } else if varName in program.macros {
                 // Macro
                 mac : ^Macro = program.macros[varName]
@@ -453,7 +500,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                     append(ts, out)
                 }
                 next(tw)
-                return false, nil
+                return {}, nil
             } else if varName in program.procs {
                 // Procedure
                 // Need to pop args into appropriate registers
@@ -462,7 +509,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 call.nargs = len(program.procs[varName].inputs)
                 append(curAST, call)
             }
-            return false, util.locStr(cur.loc, 
+            return {}, util.locStr(cur.loc, 
                 "Unknown token of '%s'", varName)
         }
         case .OParen: {
@@ -496,12 +543,12 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                     next(tw)
                     return
                 }
-                return false, "Cannot currently cast to and from anything except int and float"
+                return {}, "Cannot currently cast to and from anything except int and float"
             }
-            return false, "Invalid character after ("
+            return {}, "Invalid character after ("
         }
         case .CParen: { 
-            return false, ") AST TODO"
+            return {}, ") AST TODO"
         }
         case .OBrace: {
             next(tw)
@@ -514,18 +561,26 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 append(curAST, block)
             }
         }
+        case .Then: {
+            // Eat `then`
+            next(tw)
+            return {.If}, nil
+        }
+        case .Else: {
+            //return {}, "Cannot have an else without an if statement\n"
+        }
         case .CBrace: {
-            return true, nil
+            return {.Block}, nil
         }
         case .Proc: {
-            return false, "Cannot have a proc outside the global scope\n"
+            return {}, "Cannot have a proc outside the global scope\n"
         }
         case .Import: {
-            return false, "Cannot `import` outside of global scope"
+            return {}, "Cannot `import` outside of global scope"
         }
     }
     next(tw)
-    return false, nil
+    return {}, nil
 }
 
 // Grabs next element that isn't a drop
@@ -595,6 +650,10 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
         case ^ASTDrop:{
             replaceInputsWithVals(&type.value, name, curAST, numInputs)
         }
+        case ^ASTIf: {
+            replaceInputsWithVals(&type.cond, name, curAST, numInputs)
+            replaceInputsWithVals(&type.body, name, curAST, numInputs)
+        }
         // No traversal
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTProcCall: {}
 
@@ -605,6 +664,20 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
             pop(curAST)
         }
     }
+}
+
+resolveIfCond :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (block:AST, err:ErrorMsg) {
+    // Go until you are told to end the if
+    fmt.printf("Resolving If cond\n")
+    for !(.If in (resolveNextToken(tw, ts, program, vars, curAST) or_return)){
+        fmt.printf("Have not hit then statement\n")
+    }
+    // Check last type to be a boolean, or else bad
+    if ts[len(ts) - 1] != .Bool {
+        return {}, "Expeced a boolean expression for if statement\n"
+    }
+    popType(ts)
+    return popNoDrop(curAST), nil
 }
 
 resolveIntLit :: proc(ts:^[dynamic]Type, intLit:Token) -> (^ASTPushLiteral, util.ErrorMsg) {
@@ -673,6 +746,26 @@ resolveDash :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, dash:Token) -> (op:
     // TODO: Consider MinusInt and MinusFloat ops
     value.op = .Minus
     // append(out, value)
+    return value, nil
+}
+
+// TODO: Use this instead of resolvePlus and resolveDash
+resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token) -> (op:^ASTBinOp, err:ErrorMsg) {
+    // Requires 2 things on the stack
+    expectArgs(curAST^, ts, "-", {}, tok.loc) or_return
+    // Manual type check after
+    if len(ts) < 2 {
+        return nil, "Op '-' requires 2 inputs"
+    }
+    if !hasTypes(ts, {.Int, .Int}) {
+        return nil, "Invalid argument types for op '-'\n"
+    }
+    // Types must match, so can just drop one of type
+    popType(ts)
+    // Optimize out simple operations
+    value := new(ASTBinOp)
+    value.lhs = pop(curAST)
+    value.rhs = pop(curAST)
     return value, nil
 }
 
@@ -773,6 +866,12 @@ expectArgs :: proc(out : [dynamic]AST, ts:^[dynamic]Type, label:string, types:[]
     return expectTypes(ts, types, loc)
 }
 
+printAST :: proc(ast:AST) {
+    sb : strings.Builder
+    printASTHelper(ast, &sb)
+    fmt.printf("%s\n", strings.to_string(sb))
+}
+
 printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) {
     // indent
     for i in 0..<indent do strings.write_byte(sb, ' ')
@@ -784,7 +883,11 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                 }
                 case bool: {
                     // bool is basically just an int, right?
-                    strings.write_int(sb, int(lit))
+                    if lit {
+                        strings.write_string(sb, "true")
+                    } else {
+                        strings.write_string(sb, "false")
+                    }
                 }
                 case string: {
                     strings.write_byte(sb, '"')
@@ -855,16 +958,16 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             printASTHelper(ty.arg3, sb, false, indent + 1)
         }
         case ^ASTDrop: {
-            /*
+            
             // Remove last spaces
             for i in 0..<indent do strings.pop_byte(sb)
             printASTHelper(ty.value, sb, true, indent)
             for i in 0..<indent do strings.write_byte(sb, ' ')
             strings.write_string(sb, "Drop\n")
             return 
-            */
-            strings.write_string(sb, "drop {\n")
-            printASTHelper(ty.value, sb, true, indent + 1)
+            
+            // strings.write_string(sb, "drop {\n")
+            // printASTHelper(ty.value, sb, true, indent + 1)
 
         }
         case ^ASTVarRef: {
@@ -887,6 +990,18 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
         case ^ASTProcCall: {
             fmt.sbprintf(sb, "%s(%d args)\n", ty.ident, ty.nargs)
             return
+        }
+        case ^ASTIf: {
+            strings.write_string(sb, "if (\n")
+            printASTHelper(ty.cond, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
+            strings.write_string(sb, ") {\n")
+            printASTHelper(ty.body, sb, false, indent + 1)
+            if ty.elseBlock != nil {
+                for i in 0..<indent do strings.write_byte(sb, ' ')
+                fmt.sbprintf(sb, "} else {{\n")
+                printASTHelper(ty.elseBlock, sb, false, indent + 1)
+            }
         }
     }
     for i in 0..<indent do strings.write_byte(sb, ' ')

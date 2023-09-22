@@ -22,6 +22,7 @@ ASMContext :: struct {
     // Float labels
     floatLits : map[f64]string,
     vars: map[string]ast.Variable,
+    numIf: int
 }
 
 generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
@@ -46,6 +47,7 @@ generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     ctx.floatLits = make(map[f64]string)
     ctx.stringLits = make(map[string]string)
     ctx.vars = make(map[string]ast.Variable)
+    ctx.numIf = 0
     
     for name,pr in program.procs {
         // TODO: Conform to some calling convention
@@ -112,7 +114,8 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 case .Minus: {
                     nasm(sb, "sub rax, rbx")
                 }
-                case .Eq: {
+                // Conditions all are the same
+                case .Eq, .Gt, .Lt, .Ne: {
                     nasm(sb, "cmp rax, rbx")
                 }
             }
@@ -202,6 +205,48 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         case ^ASTProcCall: {
             // Load registers in order 
             assert(false, "TODO: AST proc call\n")
+        }
+        case ^ASTIf: {
+            ctx.numIf += 1
+            ifNumber := ctx.numIf
+            // Conditional Generation
+            // Check if condition is just a boolean lit
+            comment(sb, "Begin if %d", ctx.numIf)
+            pl, isPl := ty.cond.(^ast.ASTPushLiteral)
+            // b, isBool := isPl ? pl.(bool) : false, false
+            if isPl {
+                b, isBool := pl.(bool)
+                if isBool {
+                    // TODO:
+                    // Can optimize here to either only get if or else block
+                    loadReg(sb, "rax", int(b))
+                    fmt.sbprintf(sb, "   cmp rax, 1\n")
+                } else {
+                    generateNasmFromASTHelp(sb, ctx, &ty.cond)
+                }
+            } else {
+                generateNasmFromASTHelp(sb, ctx, &ty.cond)
+            }
+
+            // Should end up with cmp value already made
+            // Conditions get flipped due to jumping past the if block
+            switch ty.jumpType {
+                case .Eq: fmt.sbprintf(sb, "   je  if_true_%d\n", ifNumber)
+                case .Gt: fmt.sbprintf(sb, "   jgt if_true_%d\n", ifNumber)
+                case .Lt: fmt.sbprintf(sb, "   jlt if_true_%d\n", ifNumber)
+                case .Ne: fmt.sbprintf(sb, "   jne if_true_%d\n", ifNumber)
+            }
+            if ty.elseBlock != nil {
+                comment(sb, "Begin Else %d", ifNumber)
+                generateNasmFromASTHelp(sb, ctx, &ty.elseBlock, false)
+                fmt.sbprintf(sb, "   jmp end_if_%d\n", ifNumber)
+            }
+            fmt.sbprintf(sb, "if_true_%d:\n", ifNumber)
+            // Write if block
+            generateNasmFromASTHelp(sb, ctx, &ty.body, false)
+            fmt.sbprintf(sb, "end_if_%d:\n", ifNumber)
+
+            // assert(false, "TODO: if gen")
         }
     }
     return false

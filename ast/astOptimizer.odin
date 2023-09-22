@@ -68,6 +68,15 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
                 case .Eq: {
                     
                 }
+                case .Gt: {
+
+                }
+                case .Lt: {
+
+                }
+                case .Ne: {
+                    
+                }
             }
         }
         case ^ASTUnaryOp: {
@@ -126,6 +135,11 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
         }
         case ^ASTDrop: {
             changedSomething ||= optimizeASTHelp(&type.value, state)
+        }
+        case ^ASTIf: {
+            changedSomething ||= optimizeASTHelp(&type.cond, state) || 
+                optimizeASTHelp(&type.body, state)
+
         }
         // No optimizations
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTInputParam, ^ASTProcCall: {}

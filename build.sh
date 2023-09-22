@@ -35,7 +35,10 @@ fi
 if ! $ASSEMBLE ; then 
     exit 0
 fi
-nasm -felf64 out.S
+
+# Compile to allow gdb 
+nasm -felf64 -F dwarf out.S
+# nasm -felf64 out.S
 
 if ! $LINK ; then
     exit 0

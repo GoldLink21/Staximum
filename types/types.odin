@@ -31,6 +31,20 @@ StringToType : map[string]Type = {
     "string" = .String,
     "cstring" = .CString,
 }
+TypeStack :: [dynamic]Type
+cloneTypeStack :: proc(ts:TypeStack) -> TypeStack {
+    newStack := make([dynamic]Type)
+    for t in ts {
+        append(&newStack, t)
+    }
+    return newStack
+}
+popType :: proc(ts:^TypeStack) -> Type {
+    return pop(ts)
+}
+pushType :: proc(ts:^TypeStack, type:Type) {
+    append(ts, type)
+}
 
 typesToString :: proc(types:[dynamic]Type) -> string {
     sb : strings.Builder

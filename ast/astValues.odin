@@ -16,7 +16,9 @@ ASTBinOp :: struct {
 ASTBinOps :: enum {
     Plus,
     Minus,
-    Eq,
+    Eq, Ne,
+    Lt,
+    Gt
 }
 ASTBinOpsString : map[ASTBinOps]string = {
     .Plus = "+",
@@ -79,6 +81,15 @@ ASTVarRef :: struct {
 ASTProcCall :: struct {
     ident: string,
     nargs: int,
+}
+ASTIf :: struct {
+    cond, body: AST,
+    jumpType:JumpType,
+    elseBlock: AST,
+}
+JumpType :: enum {
+    Eq, Ne, 
+    Lt, Gt,
 }
 
 Variable :: struct {
@@ -211,6 +222,12 @@ cloneAST :: proc(ast:^AST) -> AST{
             procCall.ident = type.ident
             procCall.nargs = type.nargs
             out = AST(procCall)
+        }
+        case ^ASTIf: {
+            iff := new(ASTIf)
+            iff.cond = cloneAST(&type.cond)
+            iff.body = cloneAST(&type.body)
+            out = AST(iff)
         }
     }
     return out
