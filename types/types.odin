@@ -56,3 +56,16 @@ typesToString :: proc(types:[dynamic]Type) -> string {
     strings.write_string(&sb, " ]")
     return strings.to_string(sb)
 }
+
+printType :: proc(t:Type){
+    fmt.printf("<%s>", TypeToString[t])
+}
+
+printTypes :: proc(ts:[dynamic]Type) {
+    fmt.print("[")
+    for t in ts {
+        printType(t)
+        fmt.println()
+    }
+    fmt.print("]")
+}

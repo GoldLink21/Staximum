@@ -47,9 +47,8 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
         switch {
             // Skip Whitespace
             case isWhitespace(char), char == 0: {}
-            case isAlpha(char): {
-                token := parseIdent(&tok) or_return
-                append(&output, token)
+            case char == '{': {
+                append(&output, Token{.OBrace, tok.loc, nil})
             }
             case char == '.': { 
                 // Decimals
@@ -65,6 +64,7 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                 token := parseNumber(&tok) or_return
                 append(&output, token)
             }
+            // Checking for negative numbers
             case char == '-': {
                 token := handleDash(&tok) or_return
                 append(&output, token)
@@ -83,33 +83,33 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                 }
             }
             case: {
-                // Check for single symbol tokens
-                if char in SymbolTokens {
-                    append(&output, Token{SymbolTokens[char], tok.loc, nil})
-                } else {
-                    // Error
-                    return output, util.locStr(tok.loc, 
-                        "Invalid Text input")
-                }
+                parseIdent(&tok, &output) or_return
             }
         }
     }
     return output, nil
 }
 
-// Handles loose text tokens
-parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
+// Handles loose text tokens and appends it
+parseIdent :: proc(tok:^Tokenizer, output:^[dynamic]Token) -> (util.ErrorMsg) {
     // Start of word
     startIdx := tok.i
     token : Token = {.Ident, tok.loc, nil}
     // Make sure you don't go past the end
     for cur:= curT(tok); curGood(tok); cur, _ = next(tok) {
-        if nextChar, _ := peekNext(tok); !isAlnum(nextChar) {
+        if nextChar, _ := peekNext(tok); isWhitespace(nextChar) || 
+            // Also break on braces
+            nextChar == '{' || nextChar == '}' {
             break
         }
     }
+    text : string = ---
     // Handle checking what the token is
-    text := tok.text[startIdx:tok.i+1]
+    if tok.i >= len(tok.text) {
+        text = tok.text[startIdx:len(tok.text)]
+    } else {
+        text = tok.text[startIdx:tok.i+1]
+    }
     if text in IdentifierTokens {
         // Just a string that is a token value
         token.type = IdentifierTokens[text]
@@ -119,6 +119,11 @@ parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
     } else if text == "false" {
         token.type = .BoolLit
         token.value = false
+    } else if text == ":>" {
+        // Split up into two tokens
+        token.type = .Gt
+        append(output, Token{.Colon,tok.loc,nil})
+        tok.loc.col += 1
     } else if text in types.StringToType {
         token.type = .Type
         token.value = types.StringToType[text]
@@ -126,7 +131,8 @@ parseIdent :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
         token.value = text
     }
     // Add back next char
-    return token, nil
+    append(output, token)
+    return nil
 }
 
 // Handles numeric tokens

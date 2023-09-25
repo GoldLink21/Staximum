@@ -47,9 +47,20 @@ TokenType :: enum {
 }
 // Converting strings to tokens
 IdentifierTokens : map[string]TokenType = {
+    "=" = .Eq,
+    "<" = .Lt,
+    ">" = .Gt,
     "if" = .If,
+    "+" = .Plus,
+    "-" = .Dash,
+    "!" = .Bang,
+    ":" = .Colon,
     "let" = .Let,
     "end" = .End,
+    "(" = .OParen,
+    ")" = .CParen,
+    "{" = .OBrace,
+    "}" = .CBrace,
     "exit" = .Exit,
     "drop" = .Drop,
     "proc" = .Proc,
@@ -62,20 +73,6 @@ IdentifierTokens : map[string]TokenType = {
     "syscall1" = .Syscall1,
     "syscall2" = .Syscall2,
     "syscall3" = .Syscall3,
-}
-// Single char tokens
-SymbolTokens : map[u8]TokenType = {
-    '>' = .Gt,
-    '<' = .Lt,
-    '=' = .Eq,
-    '-' = .Dash,
-    '+' = .Plus,
-    '!' = .Bang,
-    ':' = .Colon,
-    '(' = .OParen,
-    ')' = .CParen,
-    '{' = .OBrace,
-    '}' = .CBrace,
 }
 
 
@@ -96,7 +93,7 @@ printToken :: proc(using token:Token) {
         case .Ident:    fmt.printf("<Ident '%s'>", value.(string))
         case .IntLit:   fmt.printf("<Int '%d'>", value.(int))
         case .FloatLit: fmt.printf("<Float '%f'>", value.(f64))
-        case .StringLit:fmt.printf("<String \"%s\">", value.(string))
+        case .StringLit:fmt.printf("<String %s>", util.escapeString(value.(string)))
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
         case .Type:     fmt.printf("<Type '%s'>", types.TypeToString[value.(types.Type)])
         case .Eq:       fmt.printf("<=>")

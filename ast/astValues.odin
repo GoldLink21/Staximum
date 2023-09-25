@@ -1,5 +1,7 @@
 package ast
 
+import "core:strings"
+import "core:fmt"
 import "../types"
 import "../util"
 
@@ -124,6 +126,176 @@ newIntLit :: proc(val:int) -> (^ASTPushLiteral) {
     ret ^= val
     return ret
 }
+// Printing
+
+printAST :: proc(ast:AST) {
+    sb : strings.Builder
+    printASTHelper(ast, &sb)
+    fmt.printf("%s\n", strings.to_string(sb))
+}
+
+printASTList :: proc(ast:^[dynamic]AST){
+    sb : strings.Builder
+    for a in ast {
+        printASTHelper(a, &sb)
+    }
+    fmt.printf("%s\n", strings.to_string(sb))
+}
+
+printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) {
+    // indent
+    for i in 0..<indent do strings.write_byte(sb, ' ')
+    switch ty in ast {
+        case ^ASTPushLiteral: {
+            switch lit in ty {
+                case int: {
+                    strings.write_int(sb, lit)
+                }
+                case bool: {
+                    // bool is basically just an int, right?
+                    if lit {
+                        strings.write_string(sb, "true")
+                    } else {
+                        strings.write_string(sb, "false")
+                    }
+                }
+                case string: {
+                    strings.write_string(sb, util.escapeString(lit))
+                }
+                case f64: {
+                    fmt.sbprintf(sb, "%.4f", lit)
+                }
+            }
+            // Handle closing here because its different
+            if inList do strings.write_byte(sb, ',')
+            strings.write_byte(sb, '\n')
+            return
+        }
+        case ^ASTInputParam: {
+            fmt.sbprintf(sb, "Input%d from %s '%s'\n", ty.index, ty.from, ty.type)
+            return
+        }
+        case ^ASTBinOp: {
+            // fmt.printf("2 %s {\n", ty.op)
+            strings.write_string(sb, ASTBinOpsString[ty.op])
+            strings.write_string(sb, " {\n")
+            printASTHelper(ty.lhs, sb, true, indent + 1)
+            printASTHelper(ty.rhs, sb, false, indent + 1)
+            // Closing is done after this
+        }
+        case ^ASTUnaryOp: {
+            strings.write_string(sb, ASTUnaryOpsString[ty.op])
+            strings.write_string(sb, " {\n")           
+            printASTHelper(ty.value, sb, false, indent + 1)
+        }
+        case ^ASTSyscall0: {
+            strings.write_string(sb, "syscall {\n")
+            printASTHelper(ty.call, sb, false, indent + 1)
+        }
+        case ^ASTSyscall1: {
+            strings.write_string(sb, "syscall {\n")
+            printASTHelper(ty.call, sb, true, indent + 1)
+            printASTHelper(ty.arg1, sb, false, indent + 1)
+        }
+        case ^ASTSyscall2: {
+            strings.write_string(sb, "syscall {\n")
+            printASTHelper(ty.call, sb, true, indent + 1)
+            printASTHelper(ty.arg1, sb, true, indent + 1)
+            printASTHelper(ty.arg2, sb, false, indent + 1)
+        }
+        case ^ASTSyscall3: {
+            strings.write_string(sb, "syscall {\n")
+            printASTHelper(ty.call, sb, true, indent + 1)
+            printASTHelper(ty.arg1, sb, true, indent + 1)
+            printASTHelper(ty.arg2, sb, true, indent + 1)
+            printASTHelper(ty.arg3, sb, false, indent + 1)
+        }
+        case ^ASTDrop: {
+            
+            // Remove last spaces
+            for i in 0..<indent do strings.pop_byte(sb)
+            printASTHelper(ty.value, sb, true, indent)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
+            strings.write_string(sb, "Drop\n")
+            return 
+            
+            // strings.write_string(sb, "drop {\n")
+            // printASTHelper(ty.value, sb, true, indent + 1)
+
+        }
+        case ^ASTVarRef: {
+            fmt.sbprintf(sb, "Ref \"%s\"\n", ty.ident)
+            return
+        }
+        case ^ASTBlock: {
+            strings.write_string(sb, "{\n")
+            for as in ty.nodes {
+                printASTHelper(as, sb, true, indent + 1)
+            }
+        }
+        case ^ASTVarDef: {
+            fmt.sbprintf(sb, "let %s =", ty.ident)
+            // Same indent because we want it to be indented 1 level in block
+            printASTHelper(ty.value, sb, false, indent)
+            // No closing }
+            return
+        }
+        case ^ASTProcCall: {
+            fmt.sbprintf(sb, "%s(%d args)\n", ty.ident, ty.nargs)
+            return
+        }
+        case ^ASTIf: {
+            strings.write_string(sb, "if (\n")
+            printASTHelper(ty.cond, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
+            strings.write_string(sb, ") {\n")
+            printASTHelper(ty.body, sb, false, indent + 1)
+            if ty.elseBlock != nil {
+                for i in 0..<indent do strings.write_byte(sb, ' ')
+                fmt.sbprintf(sb, "} else {{\n")
+                printASTHelper(ty.elseBlock, sb, false, indent + 1)
+            }
+        }
+    }
+    for i in 0..<indent do strings.write_byte(sb, ' ')
+    strings.write_string(sb, "}\n")
+}
+
+
+printProgram :: proc(program:^ASTProgram) {
+    sb: strings.Builder
+    for k, mac in program.macros {
+        strings.write_string(&sb, "macro ")
+        strings.write_string(&sb, k)
+        strings.write_string(&sb, " :")
+        for i in mac.inputs {
+            strings.write_string(&sb, types.TypeToString[i])
+            strings.write_byte(&sb, ' ')
+        }
+        strings.write_string(&sb, "> ")
+        for o in mac.outputs {
+            strings.write_string(&sb, types.TypeToString[o])
+            strings.write_byte(&sb, ' ')
+        }
+        printASTHelper(AST(mac.body), &sb, false, 0)
+    }
+    for n,pr in program.procs {
+        strings.write_string(&sb, "proc ")
+        strings.write_string(&sb, n)
+        strings.write_string(&sb, " :")
+        for i in pr.inputs {
+            strings.write_string(&sb, types.TypeToString[i])
+            strings.write_byte(&sb, ' ')
+        }
+        strings.write_string(&sb, "> ")
+        for o in pr.outputs {
+            strings.write_string(&sb, types.TypeToString[o])
+            strings.write_byte(&sb, ' ')
+        }
+        printASTHelper(AST(pr.body), &sb, false, 0)
+    }
+    fmt.printf("%s\n", strings.to_string(sb))
+}
 
 // Used for macros
 cloneAST :: proc(ast:^AST) -> AST{
@@ -227,6 +399,7 @@ cloneAST :: proc(ast:^AST) -> AST{
             iff := new(ASTIf)
             iff.cond = cloneAST(&type.cond)
             iff.body = cloneAST(&type.body)
+            iff.elseBlock = cloneAST(&type.elseBlock)
             out = AST(iff)
         }
     }

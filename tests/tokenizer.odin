@@ -21,7 +21,7 @@ testLits :: proc(t:^testing.T) {
     validTest(t, "-3",{
         {.IntLit, -3}
     })
-    validTest(t, "-1.234",{
+    validTest(t, " \n \t -1.234 \n",{
         {.FloatLit, -1.234}
     })
     validTest(t, "-.6789",{
@@ -30,10 +30,13 @@ testLits :: proc(t:^testing.T) {
     validTest(t, "\"xyz\"", {
         {.StringLit, "xyz"}
     })
+    validTest(t, "\"\\n \\t \\\"\"", {
+        {.StringLit, "\n \t \""}
+    })
     invalidTest(t, "\"there is no end")
     invalidTest(t, "\"bad escape\\c\"")
     invalidTest(t, "\"No escape at end\\")
-
+    validTest(t, "true false", {{.BoolLit, true}, {.BoolLit, false}})
 }
 
 @(test)
@@ -53,7 +56,7 @@ testOps :: proc(t:^testing.T) {
         {.IntLit, 40},
         {.Syscall1, nil},
     })
-    validTest(t, "- + { } ( ) !", {
+    validTest(t, "- + { } ( ) ! = > <", {
         {.Dash, nil},
         {.Plus, nil},
         {.OBrace, nil},
@@ -61,12 +64,40 @@ testOps :: proc(t:^testing.T) {
         {.OParen, nil},
         {.CParen, nil},
         {.Bang, nil},
+        {.Eq, nil},
+        {.Gt, nil},
+        {.Lt, nil},
     })
-}
-
-@(test)
-testFails :: proc(t:^T) {
-
+    validTest(t, "+-_,^", 
+        {{.Ident, "+-_,^"}})
+    validTest(t, `
+        proc main :> {
+            "Hello\n" puts drop
+        }`, {
+        {.Proc, nil},
+        {.Ident, "main"},
+        {.Colon, nil},
+        {.Gt, nil},
+        {.OBrace, nil},
+        {.StringLit, "Hello\n"},
+        {.Puts, nil},
+        {.Drop, nil},
+        {.CBrace, nil}
+    })
+    validTest(t, "if true{}", 
+        {{.If, nil},
+        {.BoolLit, true},
+        {.OBrace, nil},
+        {.CBrace, nil},
+    })
+    validTest(t, "let x = {5}", {
+        {.Let, nil},
+        {.Ident, "x"},
+        {.Eq,nil},
+        {.OBrace, nil},
+        {.IntLit, 5},
+        {.CBrace, nil}
+    })
 }
 
 validTest :: proc(t:^T, input:string, typeVals:[]struct{type:TokenType, val:TokenValue}, 
@@ -75,11 +106,11 @@ validTest :: proc(t:^T, input:string, typeVals:[]struct{type:TokenType, val:Toke
     tokens, err := tokenizer.tokenize(input)
     defer delete(tokens)
     if err != nil {
-        testing.fail_now(t, "Got a parsing error")
+        testing.fail_now(t, "Got a parsing error", loc)
         return false
     }
     if !testing.expect_value(t, len(tokens), len(typeVals), loc) {
-        testing.fail_now(t, "Did not get the right number of tokens")
+        testing.fail_now(t, "Did not get the right number of tokens", loc)
         return false
     }
     for tv, i in typeVals {

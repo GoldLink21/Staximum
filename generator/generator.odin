@@ -110,16 +110,19 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             switch ty.op {
                 case .Plus: {
                     nasm(sb, "add rax, rbx")
+                    nasm(sb, "push rax")
                 }
                 case .Minus: {
                     nasm(sb, "sub rax, rbx")
+                    nasm(sb, "push rax")
                 }
                 // Conditions all are the same
                 case .Eq, .Gt, .Lt, .Ne: {
                     nasm(sb, "cmp rax, rbx")
+                    // Don't push values for equality checks
                 }
             }
-            nasm(sb, "push rax")
+            // nasm(sb, "push rax")
         }
         case ^ASTUnaryOp: {
             assert(false, "TODO\n")
@@ -140,7 +143,6 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             nasm(sb, "syscall ; 1 arg")
             if inDrop {
                 comment(sb, "Dropped push rax")
-
                 return true
             }        
             pushReg(sb, "rax")
@@ -154,7 +156,6 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             nasm(sb, "syscall ; 2 args")
             if inDrop {
                 comment(sb, "Dropped push rax")
-
                 return true
             }        
             pushReg(sb, "rax")
