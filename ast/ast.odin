@@ -35,6 +35,11 @@ AST :: union {
     ^ASTVarDef,
     ^ASTProcCall,
     ^ASTIf,
+    ^ASTDup,
+    ^ASTRot,
+    ^ASTSwap,
+    ^ASTNip,
+    ^ASTOver,
 }
 
 // Full program here
@@ -591,6 +596,61 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         case .At: {
             return {}, "TODO: @ ast\n"
         }
+        case .Dup: {
+            if len(ts) == 0 {
+                return {}, util.locStr(cur.loc,
+                    "Dup requires at least one value on the stack")
+            }
+            // Copy top value of stack 
+            append(ts, ts[len(ts)-1])
+            append(curAST, new(ASTDup))
+            // return {}, nil
+        }
+        case .Nip: {
+            if len(ts) < 2 {
+                return {}, util.locStr(cur.loc,
+                    "Nip requires at least two values on the stack")
+            }
+            top := pop(ts)
+            pop(ts)
+            append(ts, top)
+            append(curAST, new(ASTNip))
+            // return {}, nil
+        }
+        case .Rot: {
+            if len(ts) < 3 {
+                return {}, util.locStr(cur.loc,
+                    "Rot requires at least three values on the stack")
+            }
+            top := pop(ts)
+            mid := pop(ts)
+            bot := pop(ts)
+            append(ts, mid)
+            append(ts, bot)
+            append(ts, top)
+            append(curAST, new(ASTRot))
+        }
+        case .Over: {
+            if len(ts) < 2 {
+                return {}, util.locStr(cur.loc,
+                    "Over requires at least two values on the stack")
+            }
+            // Copy top value of stack 
+            append(ts, ts[len(ts)-2])
+            append(curAST, new(ASTOver))
+        }
+        case .Swap: {
+            if len(ts) < 2 {
+                return {}, util.locStr(cur.loc,
+                    "Swap requires at least two values on the stack")
+            }
+            // Copy top value of stack 
+            top := pop(ts)
+            mid := pop(ts)
+            append(ts, mid)
+            append(ts, top)
+            append(curAST, new(ASTSwap))
+        }
     }
     next(tw)
     return {}, nil
@@ -661,6 +721,8 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
         }
         // No traversal
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTProcCall: {}
+        case ^ASTNip, ^ASTOver, ^ASTRot, ^ASTSwap, ^ASTDup: {}
+
 
     }
     if isRoot {

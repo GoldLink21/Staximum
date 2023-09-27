@@ -66,16 +66,52 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
                     }
                 }
                 case .Eq: {
-                    
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(ASTPushLiteral)
+                        pl ^= v1 == v2
+                        ast ^= pl
+                        return true
+                    }
                 }
                 case .Gt: {
-
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(ASTPushLiteral)
+                        pl ^= v1 > v2
+                        ast ^= pl
+                        return true
+                    }
                 }
                 case .Lt: {
-
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(ASTPushLiteral)
+                        pl ^= v1 < v2
+                        ast ^= pl
+                        return true
+                    }
                 }
                 case .Ne: {
-
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(ASTPushLiteral)
+                        pl ^= v1 != v2
+                        ast ^= pl
+                        return true
+                    }
                 }
             }
         }
@@ -143,6 +179,7 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
         }
         // No optimizations
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTInputParam, ^ASTProcCall: {}
+        case ^ASTNip, ^ASTOver, ^ASTRot, ^ASTSwap, ^ASTDup: {}
     }
     return changedSomething
 }

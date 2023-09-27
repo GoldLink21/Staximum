@@ -214,6 +214,40 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // Load registers in order 
             assert(false, "TODO: AST proc call\n")
         }
+        case ^ASTDup: {
+            popReg(sb, "rax")
+            pushReg(sb, "rax")
+            pushReg(sb, "rax")
+        }
+        case ^ASTNip:{
+            popReg(sb, "rax")
+            popReg(sb, "rbx")
+            pushReg(sb, "rax")
+        } 
+        case ^ASTOver:{
+            popReg(sb, "rax")
+            popReg(sb, "rbx")
+
+            pushReg(sb, "rbx")
+            pushReg(sb, "rax")
+            pushReg(sb, "rbx")
+        }
+        case ^ASTRot: {
+            popReg(sb, "rax")
+            popReg(sb, "rbx")
+            popReg(sb, "rcx")
+
+            pushReg(sb, "rbx")
+            pushReg(sb, "rcx")
+            pushReg(sb, "rax")
+        } 
+        case ^ASTSwap: {
+            popReg(sb, "rax")
+            popReg(sb, "rbx")
+            pushReg(sb, "rax")
+            pushReg(sb, "rbx")
+        }
+
         case ^ASTIf: {
             ctx.numIf += 1
             ifNumber := ctx.numIf

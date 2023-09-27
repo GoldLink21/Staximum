@@ -123,6 +123,12 @@ ASTProcCall :: struct {
     ident: string,
     nargs: int,
 }
+ASTDup  :: struct {}
+ASTSwap :: struct {}
+ASTRot  :: struct {}
+ASTNip  :: struct {}
+ASTOver :: struct {}
+
 ASTIf :: struct {
     cond, body: AST,
     jumpType:JumpType,
@@ -286,6 +292,10 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             fmt.sbprintf(sb, "%s(%d args)\n", ty.ident, ty.nargs)
             return
         }
+        case ^ASTDup: {
+            fmt.sbprintf(sb, "dup\n")
+            return
+        }
         case ^ASTIf: {
             strings.write_string(sb, "if (\n")
             printASTHelper(ty.cond, sb, false, indent + 1)
@@ -297,6 +307,22 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                 fmt.sbprintf(sb, "} else {{\n")
                 printASTHelper(ty.elseBlock, sb, false, indent + 1)
             }
+        }
+        case ^ASTSwap: {
+            fmt.sbprintf(sb, "swap\n")
+            return
+        }
+        case ^ASTRot: {
+            fmt.sbprintf(sb, "rot\n")
+            return
+        }
+        case ^ASTNip: {
+            fmt.sbprintf(sb, "nip\n")
+            return
+        }
+        case ^ASTOver: {
+            fmt.sbprintf(sb, "over\n")
+            return
         }
     }
     for i in 0..<indent do strings.write_byte(sb, ' ')
@@ -443,6 +469,21 @@ cloneAST :: proc(ast:^AST) -> AST{
             iff.body = cloneAST(&type.body)
             iff.elseBlock = cloneAST(&type.elseBlock)
             out = AST(iff)
+        }
+        case ^ASTDup: {
+            out = new(ASTDup)
+        }
+        case ^ASTSwap: {
+            out = new(ASTSwap)
+        }
+        case ^ASTRot: {
+            out = new(ASTRot)
+        }
+        case ^ASTNip: {
+            out = new(ASTNip)
+        }
+        case ^ASTOver: {
+            out = new(ASTOver)
         }
     }
     return out

@@ -44,11 +44,6 @@ main :: proc() {
     program, astErr := ast.resolveTokens(tokens[:])
     
     if astErr != nil {
-        mainProc := program.procs["main"] or_else nil
-        if mainProc != nil {
-            fmt.printf("Main:\n")
-            ast.printAST(mainProc.body)
-        }
         fmt.printf("AST Error: %s", astErr.(string))
         os.exit(1)
     }

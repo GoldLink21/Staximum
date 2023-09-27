@@ -20,15 +20,16 @@ TokenType :: enum {
     Lt,
     Let,
     End,
-    // Rot, // a b c => c a b
-    // Dup, // Copy top element
-    // Nip, // Remove element that is second from top
+    Rot, // Bot Mid Top => Mid Top Bot
+    Dup, // Top => Top, Top
+    Nip, // Mid, Top => Top
     Exit,
     Plus,
     Dash,
     Bang,
-    // Swap,
-    Drop,
+    Swap, // Mid, Top => Mid, Top
+    Drop, // Mid, Top => Mid
+    Over, // Mid Top => Mid Top Mid
     Type,
     Puts,
     Proc,
@@ -63,10 +64,15 @@ IdentifierTokens : map[string]TokenType = {
     ":" = .Colon,
     "let" = .Let,
     "end" = .End,
+    "dup" = .Dup,
+    "nip" = .Nip,
+    "rot" = .Rot,
     "(" = .OParen,
     ")" = .CParen,
     "{" = .OBrace,
     "}" = .CBrace,
+    "swap" = .Swap,
+    "over" = .Over,
     "exit" = .Exit,
     "drop" = .Drop,
     "proc" = .Proc,
@@ -117,6 +123,11 @@ printToken :: proc(using token:Token) {
         case .If:       fmt.printf("<If")
         case .End:      fmt.printf("<End>")
         case .Let:      fmt.printf("<Let>")
+        case .Dup:      fmt.printf("<Dup>")
+        case .Nip:      fmt.printf("<Nip>")
+        case .Rot:      fmt.printf("<Rot>")
+        case .Swap:     fmt.printf("<Swap>")
+        case .Over:     fmt.printf("<Over>")
         case .Drop:     fmt.printf("<Drop>")
         case .Exit:     fmt.printf("<Exit>")
         case .Puts:     fmt.printf("<Puts>")
