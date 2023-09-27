@@ -7,8 +7,6 @@ import "core:os"
 
 Type :: types.Type
 
-
-
 handleInOutIfValid :: proc(ts:^[dynamic]Type, ins:[]Type, outs:[]Type = {}) -> bool {
     if !hasTypes(ts, ins) do return false
     for _ in ins do popType(ts)
@@ -20,16 +18,17 @@ expectTransform :: proc(ts:^[dynamic]Type, ins:[]Type, outs:[]Type, loc:util.Loc
     for t in outs do pushType(ts, t)
 }
 
-
+// Not needed, but helps document code throughout
 pushType :: proc(ts:^[dynamic]Type, ty : Type) {
     append(ts, ty)
 }
-
+// Does some bounds checking for us
 popType :: proc(ts:^[dynamic]Type) -> (Type, bool) {
     if len(ts) == 0 do return nil, false
     return pop(ts), true
 }
 
+// Look at last element of type stack
 peekType :: proc(ts:^[dynamic]Type, ) -> Type {
     return ts[len(ts) - 1]
 }

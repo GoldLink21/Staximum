@@ -33,6 +33,18 @@ tokenizeFile :: proc(fileName: string) -> (output:[dynamic]Token = nil, err:util
     return tokenize(text, fileName)
 }
 
+// Returns true if the tokenizer currently points at a comment
+checkComment :: proc(tok: ^Tokenizer) -> bool {
+    cur := curT(tok)
+    if cur == '/' {
+        nextT, hasN := peekNext(tok)
+        if hasN && nextT == '/' {
+            return true
+        }
+    }
+    return false
+}
+
 // Tokenize a string. File is used solely for debugging
 tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, errMsg:util.ErrorMsg) {
     // TODO: Fix up the curT, next, curGood naming to be more clear
@@ -100,6 +112,9 @@ parseIdent :: proc(tok:^Tokenizer, output:^[dynamic]Token) -> (util.ErrorMsg) {
         if nextChar, _ := peekNext(tok); isWhitespace(nextChar) || 
             // Also break on braces
             nextChar == '{' || nextChar == '}' {
+            break
+        } else if checkComment(tok) {
+            tok.i -= 1
             break
         }
     }

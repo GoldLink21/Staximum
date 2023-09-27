@@ -42,6 +42,8 @@ ASTUnaryOp :: struct {
 ASTPushLiteral :: union {
     int,
     bool,
+    /* Forth uses a separate stack for floats.
+        Should I figure that out? */
     f64,
     // Strings should push the label, then the length
     string,
@@ -52,6 +54,9 @@ ASTInputParam :: struct {
     index:int,
     from:string,
 }
+/* Syscalls are broken up into how many arguments they have.
+    This may seem bad, but with at most 7, it removes all 
+    ambiguity with how many params to use for syscall*/
 ASTSyscall0 :: struct {
     call: AST,
 }
@@ -70,8 +75,36 @@ ASTSyscall3 :: struct {
     arg2: AST,
     arg3: AST,
 }
+/* Not needed yet. Will implement then
+ASTSyscall4 :: struct {
+    call: AST,
+    arg1: AST,
+    arg2: AST,
+    arg3: AST,
+    arg4: AST,
+}
+ASTSyscall5 :: struct {
+    call: AST,
+    arg1: AST,
+    arg2: AST,
+    arg3: AST,
+    arg4: AST,
+    arg5: AST,
+}
+ASTSyscall6 :: struct {
+    call: AST,
+    arg1: AST,
+    arg2: AST,
+    arg3: AST,
+    arg4: AST,
+    arg5: AST,
+    arg6: AST,
+}
+*/
+
 ASTVarDef :: struct {
     ident : string,
+    // Is nil if left just declared
     value : AST,
     // Cannot be reassigned to
     isConst : bool,
@@ -80,6 +113,12 @@ ASTVarDef :: struct {
 ASTVarRef :: struct {
     ident: string,
 }
+// x 5 ! // Setting x to 5
+ASTVarWrite :: struct {
+    ident: string,
+    value: AST,
+}
+// Stores nargs for simplicity later
 ASTProcCall :: struct {
     ident: string,
     nargs: int,
@@ -87,11 +126,14 @@ ASTProcCall :: struct {
 ASTIf :: struct {
     cond, body: AST,
     jumpType:JumpType,
+    // Can be nil if no else
     elseBlock: AST,
 }
+// Precalculated to make generation easier
 JumpType :: enum {
     Eq, Ne, 
     Lt, Gt,
+    // Gte, Lte,
 }
 
 Variable :: struct {

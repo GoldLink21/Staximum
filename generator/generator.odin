@@ -8,6 +8,10 @@ import "core:os"
 import "core:fmt"
 import "core:strings"
 
+// TODO: Convert from generating straight asm to an intermediate AST
+//  to allow better optimizations and outputting other ASM types
+
+// Tells whether comments should be generated in final ASM
 ASM_COMMENTS :: true
 ErrorMsg :: util.ErrorMsg
 
@@ -35,6 +39,7 @@ generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
     os.write_string(fd, generateNasmFromProgram(program))
 }
 
+// Takes an ASTProgram and generates nasm for it
 generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     sb: strings.Builder
     strings.write_string(&sb, 
@@ -72,6 +77,7 @@ getStringLabel :: proc(ctx:^ASMContext, str:string) -> string {
     }
     return ctx.stringLits[str]
 }
+// Takes a float value and generates a label for it unless one already exists
 getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
     if flt not_in ctx.floatLits {
         ctx.floatLits[flt] = fmt.aprintf("floatLit_%d", len(ctx.floatLits))
@@ -79,6 +85,7 @@ getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
     return ctx.floatLits[flt]
 }
 
+// Recursively traverse to generate nasm
 generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST, inDrop:=false) -> (didDrop:bool = false) {
     using ast
     switch ty in as {
@@ -87,7 +94,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 case int: {
                     // Ignore push int if dropped
                     if inDrop do return true
-                    fmt.sbprintf(sb, "   push %d\n", litType)
+                    nasm(sb, "push %d", int(litType))
                 }
                 case f64: {
                     assert(false, "TODO")
@@ -95,7 +102,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 case bool: {
                     // Ignore push int if dropped
                     if inDrop do return true
-                    fmt.sbprintf(sb, "   push %d\n", int(litType))
+                    nasm(sb, "push %d", int(litType))
                 }
                 case string: {
                     pushReg(sb, getStringLabel(ctx, litType))
@@ -110,11 +117,11 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             switch ty.op {
                 case .Plus: {
                     nasm(sb, "add rax, rbx")
-                    nasm(sb, "push rax")
+                    pushReg(sb, "rax")
                 }
                 case .Minus: {
                     nasm(sb, "sub rax, rbx")
-                    nasm(sb, "push rax")
+                    pushReg(sb, "rax")
                 }
                 // Conditions all are the same
                 case .Eq, .Gt, .Lt, .Ne: {
@@ -214,14 +221,13 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // Check if condition is just a boolean lit
             comment(sb, "Begin if %d", ctx.numIf)
             pl, isPl := ty.cond.(^ast.ASTPushLiteral)
-            // b, isBool := isPl ? pl.(bool) : false, false
             if isPl {
                 b, isBool := pl.(bool)
                 if isBool {
                     // TODO:
                     // Can optimize here to either only get if or else block
                     loadReg(sb, "rax", int(b))
-                    fmt.sbprintf(sb, "   cmp rax, 1\n")
+                    nasm(sb, "cmp rax, 1")
                 } else {
                     generateNasmFromASTHelp(sb, ctx, &ty.cond)
                 }
@@ -232,27 +238,26 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // Should end up with cmp value already made
             // Conditions get flipped due to jumping past the if block
             switch ty.jumpType {
-                case .Eq: fmt.sbprintf(sb, "   je  if_true_%d\n", ifNumber)
-                case .Gt: fmt.sbprintf(sb, "   jgt if_true_%d\n", ifNumber)
-                case .Lt: fmt.sbprintf(sb, "   jlt if_true_%d\n", ifNumber)
-                case .Ne: fmt.sbprintf(sb, "   jne if_true_%d\n", ifNumber)
+                case .Eq: nasm(sb, "je if_true_%d", ifNumber)
+                case .Gt: nasm(sb, "jgt if_true_%d", ifNumber)
+                case .Lt: nasm(sb, "jlt if_true_%d", ifNumber)
+                case .Ne: nasm(sb, "jne if_true_%d", ifNumber)
             }
             if ty.elseBlock != nil {
                 comment(sb, "Begin Else %d", ifNumber)
                 generateNasmFromASTHelp(sb, ctx, &ty.elseBlock, false)
-                fmt.sbprintf(sb, "   jmp end_if_%d\n", ifNumber)
             }
-            fmt.sbprintf(sb, "if_true_%d:\n", ifNumber)
+            nasm(sb, "jmp end_if_%d", ifNumber)
+            addLabel(sb, "if_true_%d", ifNumber)
             // Write if block
             generateNasmFromASTHelp(sb, ctx, &ty.body, false)
-            fmt.sbprintf(sb, "end_if_%d:\n", ifNumber)
-
-            // assert(false, "TODO: if gen")
+            addLabel(sb, "end_if_%d", ifNumber)
         }
     }
     return false
 }
 
+// Takes a literal value and loads it into a register
 loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^ast.ASTPushLiteral) {
     switch type in lit {
         case int: {
@@ -271,7 +276,7 @@ loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^as
     }
 }
 
-// Gets an int onto a register from AST
+// Gets an int into a register from AST. Will generate more if it needs to
 shortcutLit :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:string) -> bool {
     if lit1, isLit := as.(^ast.ASTPushLiteral); isLit {
         loadRegWithLit(sb, ctx, reg, lit1)
@@ -345,18 +350,26 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
         }
     }
 }
+// Many of these smaller functions will later be abstracted into a
+//  list of ASM objects for optimizing 
 
 // Adds an indented instruction with a newline
-nasm :: proc(sb : ^strings.Builder, instruction : string) {
-    fmt.sbprintf(sb, "   %s\n", instruction)
-} 
+nasm :: proc(sb : ^strings.Builder, instruction : string, args:..any) {
+    fmt.sbprintf(sb, "   ")
+    fmt.sbprintf(sb, instruction, ..args)
+    fmt.sbprintf(sb, "\n")
+}
+// Creates a label with a name
+addLabel :: proc(sb: ^strings.Builder, labelName:string, args:..any) {
+    fmt.sbprintf(sb, "%s:\n", fmt.tprintf(labelName, ..args))
+}
 // Loads an integer into a register
 loadRegWithInt :: proc(sb: ^strings.Builder, reg:string, value:int) {
-    fmt.sbprintf(sb, "   mov %s, %d\n", reg, value)
+    nasm(sb, "mov %s, %d", reg, value)
 }
 // Loads a register with label
 loadRegWithLabel :: proc(sb: ^strings.Builder, reg:string, label:string) {
-    fmt.sbprintf(sb, "   mov %s, %s\n", reg, label)
+    nasm(sb, "mov %s, %s", reg, label)
 }
 
 // Loads value into a register
@@ -365,25 +378,25 @@ loadReg :: proc{loadRegWithInt, loadRegWithLabel}
 // Pops value into register
 popReg :: proc(sb: ^strings.Builder, reg:string, isFloat := false) {
     if isFloat {
-        assert(false, "TODO")
+        panic("TODO")
     }
-    fmt.sbprintf(sb, "   pop %s\n", reg)
+    nasm(sb, "pop %s", reg)
 }
 
 // Pushes value in register
 pushReg :: proc(sb: ^strings.Builder, reg:string, isFloat := false) {
     if isFloat {
         assert(false, "TODO")
+        /*
+            sub rsp,0x10 // 0x10 = 16 of course.
+            // And then we just dump our SSE register onto the stack.
+            movdqu [rsp],xmm0
+            // Do what needs to be done with xmm0...
+            movdqu xmm0,[rsp]
+            add rsp,0x10
+        */
     }
-    /*
-        sub rsp,0x10 // 0x10 = 16 of course.
-        // And then we just dump our SSE register onto the stack.
-        movdqu [rsp],xmm0
-        // Do what needs to be done with xmm0...
-        movdqu xmm0,[rsp]
-        add rsp,0x10
-    */
-    fmt.sbprintf(sb, "   push %s\n", reg)
+    nasm(sb, "push %s", reg)
 }
 
 generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
@@ -391,14 +404,12 @@ generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
     // Nothing to add
     if len(ctx.stringLits) == 0 do return
     strings.write_byte(sb, '\n')
-    nasm(sb, "section .data")
+    fmt.sbprintf(sb, "section .data\n")
     for k, v in ctx.stringLits {
         strings.write_string(sb, v)
         strings.write_string(sb, ": db ")
         escapeStringToNASM(sb, k)
         strings.write_byte(sb, '\n')
-        // strings.write_string(sb, k)
-        // strings.write_string(sb, "\',10\n")
         // Should I preload their lengths too?
     }
 }
@@ -412,7 +423,8 @@ comment :: proc(sb:^strings.Builder, msg:string, params:..any) {
 }
 
 generateBSSSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
-    
+    // This will be for global variables
+
 }
 
 // Turns string  literal into what the nasm asm expects

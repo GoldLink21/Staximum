@@ -4,6 +4,7 @@ package types
 import "core:fmt"
 import "core:strings"
 
+// These are the possible underlying types you can have
 Type :: enum u8 {
     Any,
     Int, 
@@ -58,7 +59,7 @@ typesToString :: proc(types:[dynamic]Type) -> string {
 }
 
 printType :: proc(t:Type){
-    fmt.printf("<%s>", TypeToString[t])
+    fmt.printf("(%s)", TypeToString[t])
 }
 
 printTypes :: proc(ts:[dynamic]Type) {

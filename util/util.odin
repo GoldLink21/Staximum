@@ -10,11 +10,12 @@ Location :: struct {
     file: string,
 }
 
-// TODO: Location reporting is broken
+// Prints a location with file, line and column
 printLoc :: proc(loc:Location){
     fmt.printf("%s %d:%d ", loc.file, loc.line, loc.col)
 }
 
+// Printf, but with location before it
 locStr :: proc(loc:Location, msg:string, args:..any) -> string{
     locString := fmt.tprintf("%s %d:%d ", loc.file, loc.line, loc.col)
     msgString := fmt.tprintf(msg, ..args)

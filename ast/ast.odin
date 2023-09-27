@@ -42,6 +42,7 @@ ASTProgram :: struct {
     procs:map[string]^Procedure,
     macros:map[string]^Macro,
     includedFiles:[dynamic]string,
+    globalVars:map[string]Variable,
 }
 
 ASTBlock :: struct {
@@ -62,6 +63,7 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
     program = new(ASTProgram)
     ok : bool
     for cur := curr(tw); curOk(tw); cur,_ = next(tw) {
+        // Root level can only have macros, procs, and includes 
         if cur.type == .Macro {
             macro := new(Macro)
             macro.inputs  = make([dynamic]Type)
@@ -192,8 +194,9 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
             } else {
                 return program, "Import not implemented\n"
             }
+        } else if cur.type == .Let {
+            panic("TODO: global vars")
         } else {
-            // TODO: Global vars
             return program, util.locStr(cur.loc, 
                 "Global scope can only include macro and proc statements")
         }
@@ -206,20 +209,26 @@ NameLocs :: enum {
     Macro, Proc, Var
 }
 
+// Checks if a name is already used in macros, procs or variables
 nameExists :: proc(name:string, program:^ASTProgram) -> NameLocs {
     if name in program.macros do return .Macro
     if name in program.procs do return .Proc
+    if name in program.globalVars do return .Var
     return nil
 }
 
+// Returns an error message if a name is already defined
 nameExistsErr ::  proc(name:string, program:^ASTProgram) -> ErrorMsg {
     if name in program.macros do return fmt.tprintf(
         "Redeclaration of macro '%s'\n", name)
     if name in program.procs do return fmt.tprintf(
         "Redeclaration of proc '%s'\n", name)
+    if name in program.globalVars do return fmt.tprintf(
+        "Redeclaration of global var '%s'\n", name)
     return nil
 }
 
+// Compares two type stacks
 typesMatch :: proc(ts1, ts2:[dynamic]Type) -> bool {
     if len(ts1) != len(ts2) do return false
     for _, i in ts1 {
@@ -246,7 +255,7 @@ resolveTypes :: proc(tw:^TokWalk, out :^[dynamic]Type, name:string="", genAST :=
     }
     return output
 }
-
+// Grabs all tokens until a closing block is found
 resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variable, inTypes:[dynamic]Type, inAST:[dynamic]AST) -> (block:^ASTBlock, err:ErrorMsg) {
     block = new(ASTBlock)
     block.nodes = make([dynamic]AST)
@@ -281,6 +290,7 @@ resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variabl
     return block, "Reached end of input without closing block\n"
 }
 
+// Tells if certain keywords were encountered in resolving tokens
 BreakCodes :: bit_set[enum {
     Block,
     If,
@@ -338,7 +348,6 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             expectArgs(curAST^, ts, "exit", 
                 {.Int}, cur.loc) or_return
             // Break even
-            // popType()
             pushType(ts, .Int)
 
             value := new(ASTSyscall1)
@@ -453,7 +462,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 resolveNextToken(tw, ts, program, vars, curAST) or_return
                 iff.elseBlock = pop(curAST)
             } else {
-                // Return types must even out 
+                // Return types must even out
             }
             return {}, nil
         }
@@ -461,7 +470,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             return {}, "end AST TODO"
         }
         case .Let: { 
-            letDef := resolveLet(cur.loc, tw, vars, program) or_return
+            letDef := resolveLet(cur.loc, tw, ts, vars, program, curAST) or_return
             append(curAST, letDef)
         }
         case .Bang: { 
@@ -578,6 +587,9 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         }
         case .Import: {
             return {}, "Cannot `import` outside of global scope"
+        }
+        case .At: {
+            return {}, "TODO: @ ast\n"
         }
     }
     next(tw)
@@ -751,12 +763,12 @@ resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token, opName:
     return value, nil
 }
 
-resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Variable, program:^ASTProgram) -> (var:^ASTVarDef=nil,err:ErrorMsg) {
+resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, ts:^[dynamic]Type, vars: ^map[string]Variable, program:^ASTProgram, curAST:^[dynamic]AST) -> (var:^ASTVarDef=nil,err:ErrorMsg) {
     /*
     Formats
+    let <ident> // Initialize but not set
     let <ident> = {<Block with 1 return>}
     let <ident> = <AST>
-
     */
     ident, ok := peek(tw)
     if !ok {
@@ -784,53 +796,36 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, vars: ^map[string]Va
     if nextT.type == .OBrace {
         // Eat {
         next(tw)
-        block := resolveBlock(tw, program, vars^, nil, nil) or_return
-        if len(block.outputTypes) != 1 {
-            return nil, util.locStr(nextT.loc, 
-                "Setting variables to a block requires one output type")
-        }
-        vars[varName] = {
-            varName,
-            .Int,
-            false,
-            false,
-            block,
-        }
+        resolveNextToken(tw, ts, program, vars, curAST) or_return
+        value := popNoDrop(curAST)
+        block, isBlock := value.(^ASTBlock)
         varDef := new(ASTVarDef)
         varDef.ident = varName
-        varDef.value = block
+        if isBlock {
+            if len(block.outputTypes) != 1 {
+                return nil, util.locStr(nextT.loc, 
+                    "Setting variables to a block requires one output type")
+            }
+            vars[varName] = {
+                varName,
+                .Int,
+                false,
+                false,
+                block,
+            }
+            varDef.value = block
+        } else {
+            varDef.value = value
+            vars[varName] = {
+                varName,
+                .Int,
+                false,
+                false,
+                value,
+            }
+        }
         return varDef, nil
     }
-    /*
-    // let x = 1
-    if nextT.type == .IntLit {
-        pushLit := newIntLit(nextT.value.(int))
-        vars[varName] = {
-            varName,
-            .Int,
-            false,
-            false,
-            AST(pushLit),
-        }                    
-        return nil
-    }
-    // let x = 1.2
-    if nextT.type == .FloatLit {
-
-    }
-    // let x = true
-    if nextT.type == .BoolLit {
-
-    }
-    // let x = "abc"
-    if nextT.type == .StringLit {
-        nt := curr(tw)
-        return util.locStr(nextT.loc, 
-            "Currently, string literal vars are not supported for var defs")
-    }
-    // TODO: Allow setting to another variable
-    nt, _ := peek(tw)
-    */
     return nil, util.locStr(nextT.loc, 
         "Expected a block value here\n")
     // return out, "let TODO\n"

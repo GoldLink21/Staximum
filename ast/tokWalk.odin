@@ -7,12 +7,14 @@ import "core:os"
 Token     :: tokenizer.Token
 TokenType :: tokenizer.TokenType
 
+// Used instead of manually iterating through tokens
 TokWalk :: struct {
     tokens : []Token,
     i: i32,
     loc:util.Location
 }
 
+// Looks at the current token
 curr :: proc(tw : ^TokWalk) -> Token {
     // if tw.i >= i32(len(tw.tokens)) do return nil
     return tw.tokens[tw.i]
@@ -26,9 +28,11 @@ peek :: proc(tw:^TokWalk) -> (Token, bool) {
     if !hasNext(tw) do return {}, false
     return tw.tokens[tw.i + 1], true
 }
+// Checks if the next token is in bounds
 hasNext :: proc(tw:^TokWalk) -> bool {
     return tw.i + 1 < i32(len(tw.tokens))    
 }
+// Steps forward in the tokens and gives the new first element
 next :: proc(tw: ^TokWalk) -> (Token, bool) {
     tw.i += 1
     if tw.i >= i32(len(tw.tokens)) do return {}, false

@@ -3,7 +3,6 @@ package ast
 import "core:fmt"
 
 optimizeASTProgram :: proc(program: ^ASTProgram) -> ^ASTProgram {
-    // TODO:
     for _, mac in program.macros {
         optimizeASTBlock(mac.body, true)
     }
@@ -32,6 +31,7 @@ optimizeASTBlock :: proc(block:^ASTBlock, isProc:=false) -> AST {
     return block
 }
 
+// Recursively traverse to optimize everything
 optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
     changedSomething := false
     switch type in ast {
@@ -75,7 +75,7 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
 
                 }
                 case .Ne: {
-                    
+
                 }
             }
         }

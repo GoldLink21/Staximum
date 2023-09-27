@@ -13,16 +13,21 @@ TokenType :: enum {
     StringLit,
     FloatLit,
     // CString,
+    At,
     If,
     Eq,
     Gt,
     Lt,
     Let,
     End,
+    // Rot, // a b c => c a b
+    // Dup, // Copy top element
+    // Nip, // Remove element that is second from top
     Exit,
     Plus,
     Dash,
     Bang,
+    // Swap,
     Drop,
     Type,
     Puts,
@@ -47,6 +52,7 @@ TokenType :: enum {
 }
 // Converting strings to tokens
 IdentifierTokens : map[string]TokenType = {
+    "@" = .At,
     "=" = .Eq,
     "<" = .Lt,
     ">" = .Gt,
@@ -89,14 +95,15 @@ TokenValue :: union {
 // Prints a simple format for each token type
 printToken :: proc(using token:Token) {
     switch token.type {
+        case .IntLit:   fmt.printf("<%d>", value.(int))
+        case .FloatLit: fmt.printf("<%f>", value.(f64))
         case .Error:    fmt.printf("<Error '%s'>", value.(string))
         case .Ident:    fmt.printf("<Ident '%s'>", value.(string))
-        case .IntLit:   fmt.printf("<Int '%d'>", value.(int))
-        case .FloatLit: fmt.printf("<Float '%f'>", value.(f64))
-        case .StringLit:fmt.printf("<String %s>", util.escapeString(value.(string)))
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
-        case .Type:     fmt.printf("<Type '%s'>", types.TypeToString[value.(types.Type)])
+        case .StringLit:fmt.printf("<%s>", util.escapeString(value.(string)))
+        case .Type:     fmt.printf("<(%s)>", types.TypeToString[value.(types.Type)])
         case .Eq:       fmt.printf("<=>")
+        case .At:       fmt.printf("<@>")
         case .Gt:       fmt.printf("<>>")
         case .Lt:       fmt.printf("<<>")
         case .Colon:    fmt.printf("<:>")
@@ -104,17 +111,17 @@ printToken :: proc(using token:Token) {
         case .Dash:     fmt.printf("<->")
         case .OParen:   fmt.printf("<(>")
         case .CParen:   fmt.printf("<)>")
-        case .OBrace:   fmt.printf("<{{>")
         case .CBrace:   fmt.printf("<}>")
         case .Bang:     fmt.printf("<!>")
-        case .If:       fmt.printf("<If>")
+        case .OBrace:   fmt.printf("<{{>")
+        case .If:       fmt.printf("<If")
         case .End:      fmt.printf("<End>")
         case .Let:      fmt.printf("<Let>")
         case .Drop:     fmt.printf("<Drop>")
         case .Exit:     fmt.printf("<Exit>")
         case .Puts:     fmt.printf("<Puts>")
         case .Proc:     fmt.printf("<Proc>")
-        case .Then:     fmt.printf("<Then>")
+        case .Then:     fmt.printf("Then>")
         case .Else:     fmt.printf("<Else>")
         case .Macro:    fmt.printf("<Macro>")
         case .Import:   fmt.printf("<Import>")
@@ -131,10 +138,32 @@ printToken :: proc(using token:Token) {
     }
 }
 
-printTokens :: proc(tokens: []Token) {
-    for token in tokens {
-        util.printLoc(token.loc)
-        printToken(token)
-        fmt.printf("\n")
+// Prints all the tokens given along with their locations
+printTokens :: proc(tokens: []Token, includeLines := false) {
+    if includeLines {
+        for token in tokens {
+            util.printLoc(token.loc)
+            printToken(token)
+            fmt.println()
+        }
+        return
     }
+    indent := 0
+    for token in tokens {
+        if token.type == .OBrace {
+            printToken(token)
+            indent += 1
+            fmt.println()
+            for i in 0..<indent do fmt.printf(" ")
+        } else if token.type == .CBrace {
+            indent -= 1
+            fmt.println()
+            for i in 0..<indent do fmt.printf(" ")
+            printToken(token)
+        } else {
+            printToken(token)
+            fmt.printf(" ")
+        }
+    }
+    fmt.println()
 }

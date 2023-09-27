@@ -11,6 +11,12 @@ OUT_EXE=stax
 IN_FILE=input.stax
 OUT_FILE=out
 
+# Check that input file exists
+if ! [ -f $IN_FILE ]; then
+    echo "Expeced input file \"$IN_FILE\""
+    exit 1
+fi
+
 odin build . -out:$OUT_EXE -define:GENERATE_ASM=$GENERATE_ASM # \
      # -define:$ASSEMBLE=true -define:LINK=$LINK
 
