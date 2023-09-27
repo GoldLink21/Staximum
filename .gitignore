@@ -6,3 +6,4 @@ out
 input.stax
 asmTest/
 quickTest.sh
+tests.bin
