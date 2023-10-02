@@ -37,6 +37,7 @@ AST :: union {
     ^ASTVarDecl,
     ^ASTProcCall,
     ^ASTIf,
+    ^ASTWhile,
     ^ASTDup,
     ^ASTRot,
     ^ASTSwap,
@@ -484,6 +485,14 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             }
             return {}, nil
         }
+        case .While: {
+            while := new(ASTWhile)
+            while.inputTypes = types.cloneTypeStack(ts^)
+            while.cond = resolveIfCond(tw, ts, program, vars, curAST) or_return
+            resolveNextToken(tw, ts, program, vars, curAST) or_return            
+            while.body = pop(curAST)
+            return {}, nil//"while AST TODO\n"
+        }
         case .End: { 
             return {}, "end AST TODO"
         }
@@ -692,8 +701,13 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 free(varRef)
                 append(curAST, varRead)
             } else {
-                return {}, util.locStr(cur.loc, 
-                    "Operator @ must follow a variable reference")
+                //return {}, util.locStr(cur.loc, 
+                //    "Operator @ must follow a variable reference")
+                pushType(ts, .Any)
+                varRead := new(ASTVarRead)
+                varRead.ident = ""
+                varRead.isGlobal = false
+                append(curAST, varRead)
             }
         }
         case .Dup: {
@@ -748,6 +762,11 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             append(ts, mid)
             append(ts, top)
             append(curAST, new(ASTSwap))
+        }
+        case .Cast: {
+            newType := cur.value.(types.Type)
+            popType(ts)
+            pushType(ts, newType)
         }
     }
     next(tw)
@@ -817,6 +836,10 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
             replaceInputsWithVals(&type.cond, name, curAST, numInputs)
             replaceInputsWithVals(&type.body, name, curAST, numInputs)
         }
+        case ^ASTWhile: {
+            replaceInputsWithVals(&type.cond, name, curAST, numInputs)
+            replaceInputsWithVals(&type.body, name, curAST, numInputs)
+        }
         case ^ASTVarRead: {}
         case ^ASTVarWrite: {}
         // No traversal
@@ -833,9 +856,24 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
     }
 }
 
+// Used for while loops to allow AST gen
+generateInputsFromTypes :: proc(ts:[dynamic]Type) -> [dynamic]^ASTInputParam {
+    out := make([dynamic]^ASTInputParam)
+    for i in ts {
+        ip := new(ASTInputParam)
+        ip.from = ""
+        ip.type = ts[i]
+        append(&out, ip) 
+    }
+    return out
+}
+
 resolveIfCond :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (block:AST, err:ErrorMsg) {
     // Go until you are told to end the if
-    for !(.If in (resolveNextToken(tw, ts, program, vars, curAST) or_return)){}
+    blockAST := make([dynamic]AST)
+    for !(.If in (resolveNextToken(tw, ts, program, vars, curAST) or_return)){
+
+    }
     // Check last type to be a boolean, or else bad
     if ts[len(ts) - 1] != .Bool {
         return {}, "Expeced a boolean expression for if statement\n"

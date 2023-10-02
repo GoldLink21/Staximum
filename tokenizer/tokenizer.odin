@@ -85,13 +85,50 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                 token := parseString(&tok) or_return
                 append(&output, token)    
             }
-            case char == '/' && curIs(&tok, '/'): {
+            case char == '/' && nextIs(&tok, '/'): {
                 // Comment
                 for curGood(&tok) {
                     toSkip, _ := next(&tok)
                     if toSkip == '\n' {
                         break
                     }
+                }
+            }
+            case char == '/' && nextIs(&tok, '*'): {
+                // Block Comment
+                nestLevel := 1
+                next(&tok)
+                for curGood(&tok) {
+                    toSkip, _ := next(&tok)
+                    if toSkip == '*' && curIs(&tok, '/') {
+                        nestLevel -= 1
+                        if nestLevel == 0 do break
+                    } else if toSkip == '/' && curIs(&tok, '*') {
+                        nestLevel += 1
+                    }
+                }
+            }
+            
+            case char == '(': {
+                // Casting
+                loc := tok.loc
+                start := tok.i
+                // Read until ')'
+                for curGood(&tok) {
+                    toSkip, _ := next(&tok)
+                    if toSkip == ')' {
+                        break
+                    }
+                }
+                if !curGood(&tok) {
+                    return nil, "Reached End of input when expecing ')'\n"
+                }
+                str := strings.trim(tok.text[start+1:tok.i], " ")
+                if str in types.StringToType {
+                    append(&output, Token{.Cast, loc, types.StringToType[str]})
+                } else {
+                    return nil, util.locStr(tok.loc, 
+                        "Invalid type of '%s'", str)
                 }
             }
             case: {
@@ -334,6 +371,10 @@ curT :: proc(tok:^Tokenizer) -> u8 {
 peekNext :: proc(tok:^Tokenizer) -> (u8, bool) {
     if tok.i + 1 >= len(tok.text) do return 0, false
     return tok.text[tok.i + 1], true
+}
+nextIs :: proc(tok:^Tokenizer, val:u8) -> (bool) {
+    if tok.i + 1 >= len(tok.text) do return false
+    return tok.text[tok.i + 1] == val
 }
 goBack :: proc(tok:^Tokenizer) {
     tok.i -= 1

@@ -40,6 +40,7 @@ optimizeASTBlock :: proc(block:^ASTBlock, isProc:=false) -> AST {
 
 // Recursively traverse to optimize everything
 optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
+    if ast == nil do return false
     changedSomething := false
     switch type in ast {
         case ^ASTBinOp: {
@@ -179,7 +180,12 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
         }
         case ^ASTIf: {
             return optimizeASTHelp(&type.cond, state) || 
-                optimizeASTHelp(&type.body, state)
+                optimizeASTHelp(&type.body, state) ||
+                // TODO: Check this
+                optimizeASTHelp(&type.elseBlock, state)
+
+        }
+        case ^ASTWhile: {
 
         }
         // No optimizations

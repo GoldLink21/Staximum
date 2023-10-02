@@ -35,6 +35,8 @@ TokenType :: enum {
     Proc,
     Then,
     Else,
+    Cast,
+    While,
     Colon,
     Macro,
     OParen,
@@ -79,6 +81,7 @@ IdentifierTokens : map[string]TokenType = {
     "puts" = .Puts,
     "then" = .Then,
     "else" = .Else,
+    "while" = .While,
     "macro" = .Macro,
     "import" = .Import,
     "syscall0" = .Syscall0,
@@ -108,6 +111,7 @@ printToken :: proc(using token:Token) {
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
         case .StringLit:fmt.printf("<%s>", util.escapeString(value.(string)))
         case .Type:     fmt.printf("<(%s)>", types.TypeToString[value.(types.Type)])
+        case .Cast:     fmt.printf("<cast(%s)>", types.TypeToString[value.(types.Type)])
         case .Eq:       fmt.printf("<=>")
         case .At:       fmt.printf("<@>")
         case .Gt:       fmt.printf("<>>")
@@ -134,6 +138,7 @@ printToken :: proc(using token:Token) {
         case .Proc:     fmt.printf("<Proc>")
         case .Then:     fmt.printf("Then>")
         case .Else:     fmt.printf("<Else>")
+        case .While:    fmt.printf("<While")
         case .Macro:    fmt.printf("<Macro>")
         case .Import:   fmt.printf("<Import>")
         case .Syscall0: fmt.printf("<Syscall0>")

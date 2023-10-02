@@ -26,7 +26,7 @@ ASMContext :: struct {
     // Float labels
     floatLits : map[f64]string,
     globalVars: map[string]ast.Variable,
-    numIf: int,
+    numIf, numWhile: int,
     // Maps string var names to which index they are on the stack
     blockVars:map[string]int,
 }
@@ -59,6 +59,7 @@ generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     ctx.stringLits = make(map[string]string)
     ctx.globalVars = program.globalVars//make(map[string]ast.Variable)
     ctx.numIf = 0
+    ctx.numWhile = 0
     
     // Fill up global vars
     
@@ -233,6 +234,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             panic("BUG: AST Var Decl should be skipped in AST Block\n")
         }
         case ^ASTInputParam: {
+            if ty.from == "" {
+                // This means for a while loop
+                return
+            }
             when true do assert(false, "ASM Input params for procs")
             if ty.index < len(paramRegs) {
                 // Use register to call
@@ -284,6 +289,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 comment(sb, "Read from global %s", ty.ident)
                 nasm(sb, "push qword [%s]", ctx.globalVars[ty.ident].label)
                 // panic("TODO: ASM read global")
+            } else if ty.ident == "" {
+                // Random memory access
+                popReg(sb, "rax")
+                pushReg(sb, "[rax]")
             } else {
                 comment(sb, "Read from %s", ty.ident)
                 nasm(sb, "push qword [rbp-%d]", (ctx.blockVars[ty.ident] + 1) * 4)
@@ -340,6 +349,9 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // Write if block
             generateNasmFromASTHelp(sb, ctx, &ty.body, false)
             addLabel(sb, "end_if_%d", ifNumber)
+        }
+        case ^ASTWhile: {
+            panic("TODO: While Generation\n")
         }
     }
     return false

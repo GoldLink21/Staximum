@@ -140,6 +140,11 @@ ASTIf :: struct {
     // Can be nil if no else
     elseBlock: AST,
 }
+ASTWhile :: struct {
+    //cond:[dynamic]AST, 
+    cond, body: AST,
+    inputTypes: [dynamic]Type
+}
 // Precalculated to make generation easier
 JumpType :: enum {
     Eq, Ne, 
@@ -304,6 +309,13 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                 fmt.sbprintf(sb, "} else {{\n")
                 printASTHelper(ty.elseBlock, sb, false, indent + 1)
             }
+        }
+        case ^ASTWhile: {
+            strings.write_string(sb, "while (\n")
+            printASTHelper(ty.cond, sb, false, indent + 1)
+            for i in 0..<indent do strings.write_byte(sb, ' ')
+            strings.write_string(sb, ") {\n")
+            printASTHelper(ty.body, sb, false, indent + 1)
         }
         case ^ASTSwap: {
             fmt.sbprintf(sb, "swap\n")
@@ -475,6 +487,12 @@ cloneAST :: proc(ast:^AST) -> AST{
             iff.body = cloneAST(&type.body)
             iff.elseBlock = cloneAST(&type.elseBlock)
             out = AST(iff)
+        }
+        case ^ASTWhile: {
+            while := new(ASTWhile)
+            while.cond = cloneAST(&type.cond)
+            while.body = cloneAST(&type.body)
+            out = AST(while)
         }
         case ^ASTDup: {
             out = new(ASTDup)
