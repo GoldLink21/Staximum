@@ -25,8 +25,10 @@ ASMContext :: struct {
     stringLits : map[string]string,
     // Float labels
     floatLits : map[f64]string,
-    vars: map[string]ast.Variable,
-    numIf: int
+    globalVars: map[string]ast.Variable,
+    numIf: int,
+    // Maps string var names to which index they are on the stack
+    blockVars:map[string]int,
 }
 
 generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
@@ -43,7 +45,11 @@ generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
 generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     sb: strings.Builder
     strings.write_string(&sb, 
-        "   section .text\nglobal _start\n_start:\n   call main\n")
+        "section .text\nglobal _start\n_start:\n")
+    
+    
+    generateGlobalValues(&sb, nil, program)
+    nasm(&sb, "call main")
     // Exit with 0
     comment(&sb, "Safe exit")
     strings.write_string(&sb, "   mov rax, 60\n   mov rdi, 0\n   syscall\n")
@@ -51,9 +57,12 @@ generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     ctx := new(ASMContext)
     ctx.floatLits = make(map[f64]string)
     ctx.stringLits = make(map[string]string)
-    ctx.vars = make(map[string]ast.Variable)
+    ctx.globalVars = program.globalVars//make(map[string]ast.Variable)
     ctx.numIf = 0
     
+    // Fill up global vars
+    
+
     for name,pr in program.procs {
         // TODO: Conform to some calling convention
         fmt.printf("Generating Proc %s\n", name)
@@ -64,7 +73,7 @@ generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
         strings.write_string(&sb, "   ret\n")
     }
     generateDataSection(&sb, ctx)
-    generateBSSSection(&sb, ctx)
+    generateBSSSection(&sb, ctx, program)
 
     return strings.to_string(sb)
 }
@@ -109,7 +118,6 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 }
             }
         }
-
         case ^ASTBinOp:{
             shortcutLits(sb, ctx,
                 &ty.lhs, "rax",
@@ -181,9 +189,31 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             pushReg(sb, "rax")
         }
         case ^ASTBlock: {
-            for &node in ty.nodes {
-                generateNasmFromASTHelp(sb, ctx, &node)
+            // First check how many var decls there are and reserver space for them
+            beforeLen := len(ctx.blockVars)
+            numDecls := 0
+            for &node, i in ty.nodes {
+                varDecl, isVarDecl := node.(^ast.ASTVarDecl)
+                if !isVarDecl {
+                    numDecls = i
+                    break
+                }
+                comment(sb, "Var '%s'", varDecl.ident)
+                ctx.blockVars[varDecl.ident] = i
             }
+            // Save space on the stack for local vars
+            comment(sb, "Setup base pointer")
+            pushReg(sb, "rbp")
+            nasm(sb, "mov rbp, rsp")
+            comment(sb, "{{")
+            // Start after all var decls
+            for i := numDecls; i < len(ty.nodes); i += 1 {
+                generateNasmFromASTHelp(sb, ctx, &ty.nodes[i])
+            }
+            // Now clean up stack from variable space
+            comment(sb, "Cleanup base pointer")
+            popReg(sb, "rbp")
+            comment(sb, "}")
         }
         case ^ASTDrop: {
             // Move the stack pointer back to ignore the value that was there
@@ -197,8 +227,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // TODO
             assert(false, "TODO asm var ref\n")
         }
-        case ^ASTVarDef: {
-            assert(false, "TODO asm vardef\n")
+        case ^ASTVarDecl: {
+            // These will always be at the top of the scope
+            //  And should be skipped over in ASTBlock
+            panic("BUG: AST Var Decl should be skipped in AST Block\n")
         }
         case ^ASTInputParam: {
             when true do assert(false, "ASM Input params for procs")
@@ -246,6 +278,28 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             popReg(sb, "rbx")
             pushReg(sb, "rax")
             pushReg(sb, "rbx")
+        }
+        case ^ASTVarRead: {
+            if ty.isGlobal {
+                comment(sb, "Read from global %s", ty.ident)
+                nasm(sb, "push qword [%s]", ctx.globalVars[ty.ident].label)
+                // panic("TODO: ASM read global")
+            } else {
+                comment(sb, "Read from %s", ty.ident)
+                nasm(sb, "push qword [rbp-%d]", (ctx.blockVars[ty.ident] + 1) * 4)
+            }
+        }
+        case ^ASTVarWrite: {
+            comment(sb, "Write to %s", ty.ident)
+            if ty.isGlobal {
+                shortcutLit(sb, ctx, &ty.value, 
+                    fmt.tprintf("qword [%s]", ctx.globalVars[ty.ident].label))
+                //nasm(sb, "mov [%s], rax", ctx.globalVars[ty.ident].label)
+            } else {
+                // Generate value to write
+                shortcutLit(sb, ctx, &ty.value, "rax")
+                nasm(sb, "mov [rbp-%d], rax", (ctx.blockVars[ty.ident] + 1) * 4)
+            }
         }
 
         case ^ASTIf: {
@@ -439,6 +493,7 @@ generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
     if len(ctx.stringLits) == 0 do return
     strings.write_byte(sb, '\n')
     fmt.sbprintf(sb, "section .data\n")
+    comment(sb, "Space for string lits")
     for k, v in ctx.stringLits {
         strings.write_string(sb, v)
         strings.write_string(sb, ": db ")
@@ -446,6 +501,7 @@ generateDataSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
         strings.write_byte(sb, '\n')
         // Should I preload their lengths too?
     }
+    comment(sb, "End data section")
 }
 
 comment :: proc(sb:^strings.Builder, msg:string, params:..any) {
@@ -456,9 +512,23 @@ comment :: proc(sb:^strings.Builder, msg:string, params:..any) {
     }
 }
 
-generateBSSSection :: proc(sb:^strings.Builder, ctx:^ASMContext) {
+generateBSSSection :: proc(sb:^strings.Builder, ctx:^ASMContext, program:^ast.ASTProgram) {
     // This will be for global variables
+    strings.write_string(sb, "section .bss\n")
+    comment(sb, "Space for global vars")
+    for k, v in program.globalVars {
+        // v.value
+        fmt.sbprintf(sb, "global_%s: resd 1\n", k)
+    }
+}
 
+generateGlobalValues :: proc(sb:^strings.Builder, ctx:^ASMContext, program:^ast.ASTProgram) {
+    comment(sb, "Setting up global var values")
+    for k, &v in program.globalVars {
+        shortcutLit(sb, ctx, &v.value, 
+            fmt.tprintf("qword [%s]", program.globalVars[k].label))
+        // nasm(sb, "mov [global_%s], rax", k)
+    }
 }
 
 // Turns string  literal into what the nasm asm expects

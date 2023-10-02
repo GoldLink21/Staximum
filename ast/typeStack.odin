@@ -23,7 +23,7 @@ pushType :: proc(ts:^[dynamic]Type, ty : Type) {
     append(ts, ty)
 }
 // Does some bounds checking for us
-popType :: proc(ts:^[dynamic]Type) -> (Type, bool) {
+popType :: proc(ts:^[dynamic]Type) -> (t:Type, ok:bool) {
     if len(ts) == 0 do return nil, false
     return pop(ts), true
 }

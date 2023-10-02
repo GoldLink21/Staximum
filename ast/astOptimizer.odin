@@ -3,12 +3,19 @@ package ast
 import "core:fmt"
 
 optimizeASTProgram :: proc(program: ^ASTProgram) -> ^ASTProgram {
+    state := new(ASTState)
+    for _, &glob in program.globalVars {
+        optimizeASTHelp(&glob.value, state)
+    }
+    // Don't need to optimize macros
+    /*
     for _, mac in program.macros {
         optimizeASTBlock(mac.body, true)
-    }
+    }*/
     for _, pr in program.procs {
         optimizeASTBlock(pr.body, true)
     }
+    hoistVarDecls(program)
     return program
 }
 
@@ -166,18 +173,23 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
         case ^ASTBlock: {
             ast ^= optimizeASTBlock(type)
         }
-        case ^ASTVarDef: {
-            changedSomething ||= optimizeASTHelp(&type.value, state)
-        }
+        case ^ASTVarDecl: {}
         case ^ASTDrop: {
-            changedSomething ||= optimizeASTHelp(&type.value, state)
+            return optimizeASTHelp(&type.value, state)
         }
         case ^ASTIf: {
-            changedSomething ||= optimizeASTHelp(&type.cond, state) || 
+            return optimizeASTHelp(&type.cond, state) || 
                 optimizeASTHelp(&type.body, state)
 
         }
         // No optimizations
+        case ^ASTVarRead: {
+            // TODO: If value is never updated, then replace with constant
+        }
+        case ^ASTVarWrite: {
+            // TODO: If never used after this write, then can throw out most of time
+            return optimizeASTHelp(&type.value, state)
+        }
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTInputParam, ^ASTProcCall: {}
         case ^ASTNip, ^ASTOver, ^ASTRot, ^ASTSwap, ^ASTDup: {}
     }
@@ -196,4 +208,37 @@ getInnerLiteralType :: proc(ast:AST, $T:typeid) -> (T, bool) {
     return lit.(T)
 }
 
-// getInnerLiteral :: proc(ast:AST) -> (ASTPushLiteral, bool)
+// Moves all varDecls to the top of their respective function
+hoistVarDecls :: proc(program:^ASTProgram) {
+    // Do not iterate macros, as they will already be spread into
+    //  Where they get used
+    for _,pro in program.procs {
+        hoistVarDeclsBlock(pro.body)
+    }
+}
+
+hoistVarDeclsBlock :: proc(blk : ^ASTBlock) {
+    // First index that isn't a varDecl
+    topIndex := 0
+    for i := 0; i < len(blk.nodes); i += 1 {
+        #partial switch &type in blk.nodes[i] {
+            case ^ASTBlock: {
+                // TODO:
+                hoistVarDeclsBlock(type)
+            }
+            case ^ASTVarDecl: {
+                // Move to top after any other varDecls
+                if i == topIndex {
+                    topIndex += 1
+                    continue
+                }
+                // Remove current
+                elem := blk.nodes[i]
+                ordered_remove(&blk.nodes, i)
+                // Put it back at new location
+                inject_at(&blk.nodes, topIndex, elem)
+                topIndex += 1
+            }
+        }
+    }
+}

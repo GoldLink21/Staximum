@@ -102,21 +102,26 @@ ASTSyscall6 :: struct {
 }
 */
 
-ASTVarDef :: struct {
+ASTVarDecl :: struct {
     ident : string,
-    // Is nil if left just declared
-    value : AST,
-    // Cannot be reassigned to
-    isConst : bool,
+    // In the global scope
+    isGlobal: bool,
 }
 // Reference for a var. Can become a write or read with different ops
 ASTVarRef :: struct {
     ident: string,
+    isGlobal: bool,
 }
 // x 5 ! // Setting x to 5
 ASTVarWrite :: struct {
     ident: string,
     value: AST,
+    isGlobal: bool,
+}
+// x @ // gives value of x
+ASTVarRead :: struct {
+    ident: string,
+    isGlobal: bool,
 }
 // Stores nargs for simplicity later
 ASTProcCall :: struct {
@@ -259,20 +264,15 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             printASTHelper(ty.arg3, sb, false, indent + 1)
         }
         case ^ASTDrop: {
-            
             // Remove last spaces
             for i in 0..<indent do strings.pop_byte(sb)
             printASTHelper(ty.value, sb, true, indent)
             for i in 0..<indent do strings.write_byte(sb, ' ')
-            strings.write_string(sb, "Drop\n")
+            strings.write_string(sb, "drop\n")
             return 
-            
-            // strings.write_string(sb, "drop {\n")
-            // printASTHelper(ty.value, sb, true, indent + 1)
-
         }
         case ^ASTVarRef: {
-            fmt.sbprintf(sb, "Ref \"%s\"\n", ty.ident)
+            fmt.sbprintf(sb, "Ref%s \"%s\"\n", ty.isGlobal?" global":"", ty.ident)
             return
         }
         case ^ASTBlock: {
@@ -281,11 +281,8 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
                 printASTHelper(as, sb, true, indent + 1)
             }
         }
-        case ^ASTVarDef: {
-            fmt.sbprintf(sb, "let %s =", ty.ident)
-            // Same indent because we want it to be indented 1 level in block
-            printASTHelper(ty.value, sb, false, indent)
-            // No closing }
+        case ^ASTVarDecl: {
+            fmt.sbprintf(sb, "let %s%s\n",ty.isGlobal?"global ":"", ty.ident)
             return
         }
         case ^ASTProcCall: {
@@ -324,6 +321,14 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             fmt.sbprintf(sb, "over\n")
             return
         }
+        case ^ASTVarRead: {
+            fmt.sbprintf(sb, "@ %s'%s'\n", ty.isGlobal? "global ":"", ty.ident)
+            return
+        }
+        case ^ASTVarWrite: {
+            fmt.sbprintf(sb, "! %s'%s' {{\n", ty.isGlobal?"global ":"", ty.ident)
+            printASTHelper(ty.value, sb, false, indent + 1)
+        }
     }
     for i in 0..<indent do strings.write_byte(sb, ' ')
     strings.write_string(sb, "}\n")
@@ -332,10 +337,13 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
 
 printProgram :: proc(program:^ASTProgram) {
     sb: strings.Builder
+
+    for name, glob in program.globalVars {
+        fmt.sbprintf(&sb, "let %s =", name)
+        printASTHelper(glob.value, &sb, false, 1)
+    }
     for k, mac in program.macros {
-        strings.write_string(&sb, "macro ")
-        strings.write_string(&sb, k)
-        strings.write_string(&sb, " :")
+        fmt.sbprintf(&sb, "macro %s :", k)
         for i in mac.inputs {
             strings.write_string(&sb, types.TypeToString[i])
             strings.write_byte(&sb, ' ')
@@ -348,9 +356,7 @@ printProgram :: proc(program:^ASTProgram) {
         printASTHelper(AST(mac.body), &sb, false, 0)
     }
     for n,pr in program.procs {
-        strings.write_string(&sb, "proc ")
-        strings.write_string(&sb, n)
-        strings.write_string(&sb, " :")
+        fmt.sbprintf(&sb, "proc %s :", n)
         for i in pr.inputs {
             strings.write_string(&sb, types.TypeToString[i])
             strings.write_byte(&sb, ' ')
@@ -435,11 +441,10 @@ cloneAST :: proc(ast:^AST) -> AST{
             unOp.value = cloneAST(&type.value)
             out = AST(unOp)
         }
-        case ^ASTVarDef:{
-            varDef := new(ASTVarDef)
+        case ^ASTVarDecl:{
+            varDef := new(ASTVarDecl)
             varDef.ident = type.ident
-            varDef.isConst = type.isConst
-            varDef.value = cloneAST(&type.value)
+            varDef.isGlobal = type.isGlobal
             out = AST(varDef)
         }
         case ^ASTDrop:{
@@ -455,6 +460,7 @@ cloneAST :: proc(ast:^AST) -> AST{
         case ^ASTVarRef: {
             varRef := new(ASTVarRef)
             varRef.ident = type.ident
+            varRef.isGlobal = type.isGlobal
             out = AST(varRef)
         }
         case ^ASTProcCall: {
@@ -484,6 +490,19 @@ cloneAST :: proc(ast:^AST) -> AST{
         }
         case ^ASTOver: {
             out = new(ASTOver)
+        }
+        case ^ASTVarRead: {
+            varRead := new(ASTVarRead)
+            varRead.ident = type.ident[:]
+            varRead.isGlobal = type.isGlobal
+            out = varRead
+        }
+        case ^ASTVarWrite: {
+            varWrite := new(ASTVarWrite)
+            varWrite.ident = type.ident[:]
+            varWrite.value = cloneAST(&type.value)
+            varWrite.isGlobal = type.isGlobal
+            out = varWrite
         }
     }
     return out

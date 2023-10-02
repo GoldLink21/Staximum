@@ -13,7 +13,7 @@ TokenType :: enum {
     StringLit,
     FloatLit,
     // CString,
-    At,
+    At, // Used for reading from variables
     If,
     Eq,
     Gt,
@@ -26,7 +26,7 @@ TokenType :: enum {
     Exit,
     Plus,
     Dash,
-    Bang,
+    Bang, // Used for writing to variables
     Swap, // Mid, Top => Mid, Top
     Drop, // Mid, Top => Mid
     Over, // Mid Top => Mid Top Mid
@@ -171,6 +171,12 @@ printTokens :: proc(tokens: []Token, includeLines := false) {
             fmt.println()
             for i in 0..<indent do fmt.printf(" ")
             printToken(token)
+            fmt.println()
+            for i in 0..<indent do fmt.printf(" ")
+        } else if token.type == .Proc {
+            fmt.println()
+            printToken(token)
+            fmt.printf(" ")
         } else {
             printToken(token)
             fmt.printf(" ")

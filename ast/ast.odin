@@ -32,7 +32,9 @@ AST :: union {
     ^ASTDrop,
     ^ASTBlock,
     ^ASTVarRef,
-    ^ASTVarDef,
+    ^ASTVarRead,
+    ^ASTVarWrite,
+    ^ASTVarDecl,
     ^ASTProcCall,
     ^ASTIf,
     ^ASTDup,
@@ -200,7 +202,15 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
                 return program, "Import not implemented\n"
             }
         } else if cur.type == .Let {
-            panic("TODO: global vars")
+            astHolder := make([dynamic]AST)
+            defer delete(astHolder)
+            typeHolder := make([dynamic]Type)
+            defer delete(typeHolder)
+            
+            letDef, setVar := resolveLet(cur.loc, tw, &typeHolder, &program.globalVars, program, &astHolder, true) or_return
+            // Not needed
+            free(letDef)
+            tw.i -= 1
         } else {
             return program, util.locStr(cur.loc, 
                 "Global scope can only include macro and proc statements")
@@ -211,25 +221,28 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
 
 // Places a variable can be defined
 NameLocs :: enum {
-    Macro, Proc, Var
+    Macro, Proc, LocalVar, GlobalVar,
 }
 
 // Checks if a name is already used in macros, procs or variables
-nameExists :: proc(name:string, program:^ASTProgram) -> NameLocs {
+nameExists :: proc(name:string, program:^ASTProgram, localVars:^map[string]Variable = nil) -> NameLocs {
     if name in program.macros do return .Macro
     if name in program.procs do return .Proc
-    if name in program.globalVars do return .Var
+    if name in program.globalVars do return .GlobalVar
+    if localVars != nil && name in localVars do return .LocalVar
     return nil
 }
 
 // Returns an error message if a name is already defined
-nameExistsErr ::  proc(name:string, program:^ASTProgram) -> ErrorMsg {
+nameExistsErr ::  proc(name:string, program:^ASTProgram, localVars:^map[string]Variable = nil) -> ErrorMsg {
     if name in program.macros do return fmt.tprintf(
         "Redeclaration of macro '%s'\n", name)
     if name in program.procs do return fmt.tprintf(
         "Redeclaration of proc '%s'\n", name)
     if name in program.globalVars do return fmt.tprintf(
         "Redeclaration of global var '%s'\n", name)
+    if localVars != nil && name in localVars do return fmt.tprintf(
+        "Redeclaration of local var '%s'\n", name)
     return nil
 }
 
@@ -352,16 +365,16 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         case .Exit: {
             expectArgs(curAST^, ts, "exit", 
                 {.Int}, cur.loc) or_return
-            // Break even
-            pushType(ts, .Int)
+            // Exit gets auto dropped
 
             value := new(ASTSyscall1)
             value.call = new(ASTPushLiteral)
             value.call.(^ASTPushLiteral) ^= SYS_EXIT
             value.arg1 = popNoDrop(curAST)
-            append(curAST, value)
-            // Consider dropping after exit calls cause value will never be used
-            // append(&out, new(Drop))
+
+            drop := new(ASTDrop)
+            drop.value = value
+            append(curAST, drop)
         }
         case .Syscall0: {
             expectArgs(curAST^, ts, "syscall0", 
@@ -475,11 +488,66 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             return {}, "end AST TODO"
         }
         case .Let: { 
-            letDef := resolveLet(cur.loc, tw, ts, vars, program, curAST) or_return
+            letDef, setVar := resolveLet(cur.loc, tw, ts, vars, program, curAST) or_return
             append(curAST, letDef)
+            if setVar != nil {
+                append(curAST, setVar)
+            }
+            // Don't increment after
+            return
         }
-        case .Bang: { 
-            return {}, "! AST TODO"
+        case .Bang: {
+            // Variable write
+            // x 10 ! // writes 10 to x
+            if len(ts) < 2 {
+                return {}, util.locStr(cur.loc, 
+                    "Writing to variable requires 2 elements on stack")
+            }
+            value := popNoDrop(curAST)
+            // Variable reference
+            top := popNoDrop(curAST)
+            ref, isRef := top.(^ASTVarRef)
+
+            valueType, _ := popType(ts)
+            refType,   _ := popType(ts)
+            if refType != .Ptr || !isRef {
+                return {}, util.locStr(cur.loc,
+                    "Cannot write to a non variable\n")
+            }
+            // Check if the name is defined
+            nameLoc := nameExists(ref.ident, program, vars)
+            if nameLoc == nil {
+                return {}, util.locStr(cur.loc, 
+                    "Cannot write to undefined ident '%s'", ref.ident)
+            }
+            // Setup AST
+            varWrite := new(ASTVarWrite)
+            varWrite.ident = ref.ident
+            varWrite.value = value
+            
+            // Make sure 
+            varType : Type
+            if nameLoc == .GlobalVar {
+                varWrite.isGlobal = true
+                varType = program.globalVars[ref.ident].type
+            } else if nameLoc == .LocalVar {
+                varWrite.isGlobal = false
+                varType = vars[ref.ident].type
+            } else {
+                // Err
+                free(varWrite)
+                return {}, util.locStr(cur.loc, 
+                    "Cannot write to non variable ident '%s'", ref.ident)
+            }
+            // Make sure you are writing the right type
+            if varType != valueType {
+                return {}, util.locStr(cur.loc, 
+                    "Cannot write type '%s' to '%s' with type '%s'", 
+                    types.TypeToString[valueType], 
+                    ref.ident, 
+                    types.TypeToString[varType])
+            }
+            append(curAST, varWrite)
         }
         case .Type: { 
             return {}, "(type) AST TODO"
@@ -490,15 +558,20 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         case .Ident: {
             // raw ident should give the value from variable
             varName := cur.value.(string)
-            if varName in vars {
+            loc := nameExists(varName, program, vars)
+            if loc == nil {
+                return nil, util.locStr(cur.loc, 
+                    "Unknown identifier of '%s'", varName)
+            }
+            if loc == .LocalVar {
                 // Variable
                 varRef := new(ASTVarRef)
+                varRef.isGlobal = false
                 varRef.ident = varName
-                pushType(ts, vars[varName].type)
+                pushType(ts, .Ptr)
                 (&vars[varName]).used = true
                 append(curAST, varRef)
-                return {}, nil
-            } else if varName in program.macros {
+            } else if loc == .Macro {
                 // Macro
                 mac : ^Macro = program.macros[varName]
                 // Check input types
@@ -514,18 +587,25 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 for out in mac.outputs {
                     append(ts, out)
                 }
-                next(tw)
-                return {}, nil
-            } else if varName in program.procs {
+            } else if loc == .Proc {
                 // Procedure
                 // Need to pop args into appropriate registers
                 call := new(ASTProcCall)
                 call.ident = varName
                 call.nargs = len(program.procs[varName].inputs)
                 append(curAST, call)
+            } else if loc == .GlobalVar {
+                // Global Variable
+                varRef := new(ASTVarRef)
+                varRef.isGlobal = true
+                varRef.ident = varName[:]
+                pushType(ts, .Ptr)
+                (&program.globalVars[varName]).used = true
+                append(curAST, varRef)
+            } else {
+                return {}, util.locStr(cur.loc, 
+                    "Unknown token of '%s'", varName)    
             }
-            return {}, util.locStr(cur.loc, 
-                "Unknown token of '%s'", varName)
         }
         case .OParen: {
             // Check for type casting
@@ -594,7 +674,27 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             return {}, "Cannot `import` outside of global scope"
         }
         case .At: {
-            return {}, "TODO: @ ast\n"
+            // Var read
+            // x @ // gives value of x
+            last := popNoDrop(curAST)
+            expectTypes(ts, {.Ptr}, cur.loc) or_return
+            varRef, isVarRef := last.(^ASTVarRef)
+            if isVarRef {
+                // Handle reading the data
+                varRead := new(ASTVarRead)
+                varRead.ident = varRef.ident
+                varRead.isGlobal = varRef.isGlobal
+                if varRef.isGlobal {
+                    pushType(ts, program.globalVars[varRef.ident].type)
+                } else {
+                    pushType(ts, vars[varRef.ident].type)
+                }
+                free(varRef)
+                append(curAST, varRead)
+            } else {
+                return {}, util.locStr(cur.loc, 
+                    "Operator @ must follow a variable reference")
+            }
         }
         case .Dup: {
             if len(ts) == 0 {
@@ -604,7 +704,6 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             // Copy top value of stack 
             append(ts, ts[len(ts)-1])
             append(curAST, new(ASTDup))
-            // return {}, nil
         }
         case .Nip: {
             if len(ts) < 2 {
@@ -615,7 +714,6 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             pop(ts)
             append(ts, top)
             append(curAST, new(ASTNip))
-            // return {}, nil
         }
         case .Rot: {
             if len(ts) < 3 {
@@ -709,8 +807,8 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
         case ^ASTUnaryOp:{
             replaceInputsWithVals(&type.value, name, curAST, numInputs)
         }
-        case ^ASTVarDef:{
-            replaceInputsWithVals(&type.value, name, curAST, numInputs)
+        case ^ASTVarDecl:{
+            // Nothing to do
         }
         case ^ASTDrop:{
             replaceInputsWithVals(&type.value, name, curAST, numInputs)
@@ -719,6 +817,8 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
             replaceInputsWithVals(&type.cond, name, curAST, numInputs)
             replaceInputsWithVals(&type.body, name, curAST, numInputs)
         }
+        case ^ASTVarRead: {}
+        case ^ASTVarWrite: {}
         // No traversal
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTProcCall: {}
         case ^ASTNip, ^ASTOver, ^ASTRot, ^ASTSwap, ^ASTDup: {}
@@ -765,55 +865,6 @@ resolveStringLit :: proc(ts:^[dynamic]Type, strLit:Token) -> (^ASTPushLiteral, ^
     pushType(ts, .Ptr)
     return length, value, nil
 }
-
-// Handle setting up plus AST
-resolvePlus :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, plus:Token) -> (op:^ASTBinOp = nil, err:ErrorMsg) {
-    // Requires 2 things on the stack
-    expectArgs(curAST^, ts, "+", {}, plus.loc) or_return
-    // Manual type check
-    if len(ts) < 2 {
-        return nil, fmt.tprintf("Op '+' requires 2 inputs but got %d\n", len(ts))
-    }
-    // TODO: Add float support
-    if !hasTypes(ts, {.Int, .Int}) {
-        return nil, "Invalid argument types for op '+'\n"
-    }
-    // Types must match, so can just drop one of type
-    popType(ts)
-    // Optimize out simple operations
-    value := new(ASTBinOp)
-    value.lhs = pop(curAST)
-    value.rhs = pop(curAST)
-    // TODO: Consider changing to PlusInt and PlusFloat 
-    value.op = .Plus
-    return value, nil
-}
-
-// Handle setting up subtraction AST
-resolveDash :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, dash:Token) -> (op:^ASTBinOp, err:ErrorMsg) {
-    // Requires 2 things on the stack
-    expectArgs(curAST^, ts, "-", {}, dash.loc) or_return
-    // Manual type check after
-    if len(ts) < 2 {
-        return nil, "Op '-' requires 2 inputs"
-    }
-    // TODO: Add float support
-    if !hasTypes(ts, {.Int, .Int}) {
-        return nil, "Invalid argument types for op '-'\n"
-    }
-    // Types must match, so can just drop one of type
-    popType(ts)
-    // Optimize out simple operations
-    value := new(ASTBinOp)
-    value.lhs = pop(curAST)
-    value.rhs = pop(curAST)
-    // TODO: Consider MinusInt and MinusFloat ops
-    value.op = .Minus
-    // append(out, value)
-    return value, nil
-}
-
-// TODO: Use this instead of resolvePlus and resolveDash
 resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token, opName:string, opType:ASTBinOps, inTypes:[]Type, outType:Type) -> (op:^ASTBinOp, err:ErrorMsg) {
     // Requires 2 things on the stack
     expectArgs(curAST^, ts, opName, inTypes, tok.loc) or_return
@@ -824,73 +875,97 @@ resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token, opName:
     value.op = opType
     return value, nil
 }
+resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, 
+    ts:^[dynamic]Type, vars: ^map[string]Variable, 
+    program:^ASTProgram, curAST:^[dynamic]AST, isGlobal:=false) -> 
+        (var:^ASTVarDecl=nil,setter:^ASTVarWrite=nil, err:ErrorMsg) {
 
-resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk, ts:^[dynamic]Type, vars: ^map[string]Variable, program:^ASTProgram, curAST:^[dynamic]AST) -> (var:^ASTVarDef=nil,err:ErrorMsg) {
     /*
     Formats
-    let <ident> // Initialize but not set
-    let <ident> = {<Block with 1 return>}
-    let <ident> = <AST>
+    let <ident> : <type> // Initialize but not set
+    let <ident> = <AST> // if block, must have 1 return
+    let <ident> : <type> = <AST>
     */
-    ident, ok := peek(tw)
-    if !ok {
-        // Reached end of input
-        return nil, util.locStr(startLoc, 
-            "Keyword 'let' requires an identifier after it")
-    }
     // Eat identifier
-    expectNext(tw, .Ident) or_return
+    ident := expectNext(tw, .Ident) or_return
     varName := ident.value.(string)
     // Check if this variable exists already
-    if varName in vars {
-        return nil, util.locStr(curr(tw).loc, 
-            "Redeclaration of var '%s'", varName)
+    nameExistsErr(varName, program, vars) or_return
+    // Type given by : <type> syntax
+    expectedType : Type
+    // Check for : <type>
+    if _, hasColon := tryNext(tw, .Colon); hasColon {
+        // Needs to be <type>
+        typeToken := expectNext(tw, .Type) or_return
+        expectedType = typeToken.value.(types.Type)
     }
-    // TODO: Check if name exists in procedures and macros
-    // Eat = after
-    eq := expectNext(tw, .Eq) or_return
-    nextT, ok2 := next(tw)
-    if !ok2 {
-        return nil, util.locStr(eq.loc, 
-            "Expected a value to set variable to after it")
-    }
-    // { values } syntax
-    if nextT.type == .OBrace {
-        // Eat {
+    // Handle =
+    if eq, ok := tryNext(tw, .Eq); ok {
+        // Skip past =
         next(tw)
         resolveNextToken(tw, ts, program, vars, curAST) or_return
+
         value := popNoDrop(curAST)
         block, isBlock := value.(^ASTBlock)
-        varDef := new(ASTVarDef)
-        varDef.ident = varName
         if isBlock {
+            // Make sure there was only one output type
             if len(block.outputTypes) != 1 {
-                return nil, util.locStr(nextT.loc, 
+                return nil,nil, util.locStr(eq.loc, 
                     "Setting variables to a block requires one output type")
             }
-            vars[varName] = {
-                varName,
-                .Int,
-                false,
-                false,
-                block,
+            retType, _ := popType(ts)
+            if expectedType != nil && expectedType != retType {
+                return nil, nil, util.locStr(eq.loc, 
+                    "Expected type of '%s' does not match actual of '%s'",
+                    types.TypeToString[expectedType], 
+                    types.TypeToString[retType])
             }
-            varDef.value = block
+            expectedType = retType
         } else {
-            varDef.value = value
-            vars[varName] = {
-                varName,
-                .Int,
-                false,
-                false,
-                value,
+            if len(ts) == 0 do return nil, nil, 
+                util.locStr(eq.loc, "Did not have extra type to return")
+            type, _ := popType(ts)
+            if expectedType != nil && expectedType != type {
+                return nil, nil, util.locStr(eq.loc, 
+                    "Expected type of '%s' does not match actual of '%s'",
+                    types.TypeToString[expectedType], 
+                    types.TypeToString[type])
             }
+            expectedType = type
         }
-        return varDef, nil
+        setter = new(ASTVarWrite)
+        setter.ident = varName
+        setter.value = value
+    } else if expectedType == nil {
+        // Requires : <type>
+        return nil, nil, util.locStr(ident.loc, 
+            "Variable declarations without initialization requires a type annotation")
+    } else {
+        // Skip past <type> from :
+        next(tw)
     }
-    return nil, util.locStr(nextT.loc, 
-        "Expected a block value here\n")
-    // return out, "let TODO\n"
+    var = new(ASTVarDecl)
+    var.ident = varName
+    if isGlobal {
+        program.globalVars[varName] = {
+            // varName,
+            fmt.aprintf("global_%s", varName),
+            expectedType,
+            false,
+            false,
+            (setter != nil) ? setter.value : nil,
+        }
+    } else {
+        vars[varName] = {
+            varName,
+            expectedType,
+            false,
+            false,
+            (setter != nil) ? setter.value : nil,
+        }
+    }
+    var.isGlobal = isGlobal
+    return var, setter, nil
 }
 
 // Will eat types passed in
