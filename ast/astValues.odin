@@ -19,12 +19,16 @@ ASTBinOps :: enum {
     Plus,
     Minus,
     Eq, Ne,
-    Lt,
-    Gt
+    Lt, Le,
+    Gt, Ge
 }
 ASTBinOpsString : map[ASTBinOps]string = {
     .Plus = "+",
     .Eq = "=",
+    .Ne = "!=",
+    .Minus = "-",
+    .Lt = "<",
+    .Gt = ">",
 }
 ASTUnaryOps :: enum {
     CastFloatToInt,
@@ -141,8 +145,9 @@ ASTIf :: struct {
     elseBlock: AST,
 }
 ASTWhile :: struct {
-    //cond:[dynamic]AST, 
-    cond, body: AST,
+    cond:[dynamic]AST, 
+    body: AST,
+    jumpType:JumpType,
     inputTypes: [dynamic]Type
 }
 // Precalculated to make generation easier
@@ -192,7 +197,7 @@ printAST :: proc(ast:AST) {
     fmt.printf("%s\n", strings.to_string(sb))
 }
 
-printASTList :: proc(ast:^[dynamic]AST){
+printASTList :: proc(ast:[dynamic]AST){
     sb : strings.Builder
     for a in ast {
         printASTHelper(a, &sb)
@@ -312,7 +317,9 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
         }
         case ^ASTWhile: {
             strings.write_string(sb, "while (\n")
-            printASTHelper(ty.cond, sb, false, indent + 1)
+            for n in ty.cond {
+                printASTHelper(n, sb, false, indent + 1)
+            }
             for i in 0..<indent do strings.write_byte(sb, ' ')
             strings.write_string(sb, ") {\n")
             printASTHelper(ty.body, sb, false, indent + 1)
@@ -381,6 +388,14 @@ printProgram :: proc(program:^ASTProgram) {
         printASTHelper(AST(pr.body), &sb, false, 0)
     }
     fmt.printf("%s\n", strings.to_string(sb))
+}
+
+cloneASTList :: proc(ast:^[dynamic]AST) -> [dynamic]AST {
+    out := make([dynamic]AST)
+    for &a in ast {
+        append(&out, cloneAST(&a))
+    }
+    return out
 }
 
 // Used for macros
@@ -486,12 +501,14 @@ cloneAST :: proc(ast:^AST) -> AST{
             iff.cond = cloneAST(&type.cond)
             iff.body = cloneAST(&type.body)
             iff.elseBlock = cloneAST(&type.elseBlock)
+            iff.jumpType = type.jumpType
             out = AST(iff)
         }
         case ^ASTWhile: {
             while := new(ASTWhile)
-            while.cond = cloneAST(&type.cond)
+            while.cond = cloneASTList(&type.cond)
             while.body = cloneAST(&type.body)
+            while.jumpType = type.jumpType
             out = AST(while)
         }
         case ^ASTDup: {
@@ -524,4 +541,153 @@ cloneAST :: proc(ast:^AST) -> AST{
         }
     }
     return out
+}
+
+astListEq :: proc(a, b:[dynamic]AST) -> bool {
+    if len(a) != len(b) do return false
+    for i in 0..<len(a) {
+        if !astEq(a[i], b[i]) do return false
+    }
+    return true
+}
+
+astEq :: proc(a, b: AST) -> bool {
+    switch &type in a {
+        case ^ASTInputParam: {
+            ip, isInputParam := b.(^ASTInputParam)
+            return isInputParam &&
+                type.from == ip.from &&
+                type.index == ip.index &&
+                type.type == ip.type
+        }
+        case ^ASTBinOp:{
+            bo, isBinOp := b.(^ASTBinOp)
+            return isBinOp &&
+                type.op == bo.op &&
+                astEq(type.lhs, bo.lhs) &&
+                astEq(type.rhs, bo.rhs)
+        }
+        case ^ASTBlock:{
+            bl, isBlock := b.(^ASTBlock)
+            return isBlock &&
+                astListEq(type.nodes, bl.nodes)
+                // Could check output types, but if all inside nodes
+                //  match then, they should match
+        }
+        case ^ASTSyscall0: {
+            sc0, isSC0 := b.(^ASTSyscall0)
+            return isSC0 &&
+                astEq(type.call, sc0.call)
+
+        }
+        case ^ASTSyscall1:{
+            sc1, isSC1 := b.(^ASTSyscall1)
+            return isSC1 &&
+                astEq(type.call, sc1.call) && 
+                astEq(type.arg1, sc1.arg1)
+        }
+        case ^ASTSyscall2:{
+            sc2, isSC2 := b.(^ASTSyscall2)
+            return isSC2 &&
+                astEq(type.call, sc2.call) && 
+                astEq(type.arg1, sc2.arg1) &&
+                astEq(type.arg2, sc2.arg2)
+
+        }
+        case ^ASTSyscall3:{
+            sc3, isSC3 := b.(^ASTSyscall3)
+            return isSC3 &&
+                astEq(type.call, sc3.call) && 
+                astEq(type.arg1, sc3.arg1) &&
+                astEq(type.arg2, sc3.arg2) &&
+                astEq(type.arg3, sc3.arg3)
+
+        }
+        case ^ASTUnaryOp:{
+            uo, isUnaryOp := b.(^ASTUnaryOp)
+            return isUnaryOp &&
+                type.op == uo.op &&
+                astEq(type.value, uo.value)
+        }
+        case ^ASTVarDecl:{
+            vd, isVarDecl := b.(^ASTVarDecl)
+            return isVarDecl &&
+                type.ident == vd.ident &&
+                type.isGlobal == vd.isGlobal
+        }
+        case ^ASTDrop:{
+            d, isDrop := b.(^ASTDrop)
+            return isDrop &&
+                astEq(type.value, d.value)
+        }
+        case ^ASTPushLiteral:{
+            pl, isPushLit := b.(^ASTPushLiteral)
+            return isPushLit &&
+                type == pl
+        } 
+        case ^ASTVarRef: {
+            vr, isVarRef := b.(^ASTVarRef)
+            return isVarRef &&
+                type.isGlobal == vr.isGlobal &&
+                type.ident == vr.ident
+        }
+        case ^ASTProcCall: {
+            pc, isProcCall := b.(^ASTProcCall)
+            return isProcCall &&
+                type.nargs == pc.nargs &&
+                type.ident == pc.ident
+        }
+        case ^ASTIf: {
+            i, isIf := b.(^ASTIf)
+            return isIf &&
+                type.jumpType == i.jumpType && 
+                astEq(type.cond, i.cond) &&
+                astEq(type.body, i.body) &&
+                astEq(type.elseBlock, i.elseBlock)
+        }
+        case ^ASTWhile: {
+            w, isWhile := b.(^ASTWhile)
+            return isWhile &&
+                type.jumpType == w.jumpType &&
+                astListEq(type.cond, w.cond) &&
+                astEq(type.body, w.body)
+        }
+        case ^ASTDup: {
+            _, isDup := b.(^ASTDup)
+            return isDup
+        }
+        case ^ASTSwap: {
+            _, isSwap := b.(^ASTSwap)
+            return isSwap
+        }
+        case ^ASTRot: {
+            _, isRot := b.(^ASTRot)
+            return isRot
+        }
+        case ^ASTNip: {
+            _, isNip := b.(^ASTNip)
+            return isNip
+        }
+        case ^ASTOver: {
+            _, isOver := b.(^ASTOver)
+            return isOver
+        }
+        case ^ASTVarRead: {
+            vr, isRead := b.(^ASTVarRead)
+            return isRead &&
+                type.ident == vr.ident &&
+                type.isGlobal == vr.isGlobal
+        }
+        case ^ASTVarWrite: {
+            vw, isWrite := b.(^ASTVarWrite)
+            return isWrite && 
+                type.ident == vw.ident && 
+                vw.isGlobal != type.isGlobal &&
+                astEq(type.value, vw.value)
+        }
+        case nil: {
+            return b == nil
+        }
+    }
+    panic("Checking AST equality did not catch all types\n")
 }

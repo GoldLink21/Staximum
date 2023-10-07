@@ -95,6 +95,13 @@ getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
     return ctx.floatLits[flt]
 }
 
+generateNasmFromASTList :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: [dynamic]ast.AST, inDrop:=false) -> (didDrop:bool = false) {
+    for &a in as {
+        generateNasmFromASTHelp(sb, ctx, &a, false)
+    }
+    return false
+}
+
 // Recursively traverse to generate nasm
 generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST, inDrop:=false) -> (didDrop:bool = false) {
     using ast
@@ -133,7 +140,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                     pushReg(sb, "rax")
                 }
                 // Conditions all are the same
-                case .Eq, .Gt, .Lt, .Ne: {
+                case .Eq, .Gt, .Lt, .Ne, .Ge, .Le: {
                     nasm(sb, "cmp rax, rbx")
                     // Don't push values for equality checks
                 }
@@ -203,17 +210,17 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                 ctx.blockVars[varDecl.ident] = i
             }
             // Save space on the stack for local vars
-            comment(sb, "Setup base pointer")
-            pushReg(sb, "rbp")
-            nasm(sb, "mov rbp, rsp")
+            // comment(sb, "Setup base pointer")
+            // pushReg(sb, "rbp")
+            // nasm(sb, "mov rbp, rsp")
             comment(sb, "{{")
             // Start after all var decls
             for i := numDecls; i < len(ty.nodes); i += 1 {
                 generateNasmFromASTHelp(sb, ctx, &ty.nodes[i])
             }
             // Now clean up stack from variable space
-            comment(sb, "Cleanup base pointer")
-            popReg(sb, "rbp")
+            // comment(sb, "Cleanup base pointer")
+            // popReg(sb, "rbp")
             comment(sb, "}")
         }
         case ^ASTDrop: {
@@ -234,8 +241,9 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             panic("BUG: AST Var Decl should be skipped in AST Block\n")
         }
         case ^ASTInputParam: {
-            if ty.from == "" {
+            if ty.from == "while" {
                 // This means for a while loop
+                comment(sb, "While input")
                 return
             }
             when true do assert(false, "ASM Input params for procs")
@@ -252,9 +260,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             assert(false, "TODO: AST proc call\n")
         }
         case ^ASTDup: {
-            popReg(sb, "rax")
-            pushReg(sb, "rax")
-            pushReg(sb, "rax")
+            // popReg(sb, "rax")
+            // pushReg(sb, "rax")
+            // pushReg(sb, "rax")
+            pushReg(sb, "qword [rsp]")
         }
         case ^ASTNip:{
             popReg(sb, "rax")
@@ -262,12 +271,15 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             pushReg(sb, "rax")
         } 
         case ^ASTOver:{
+            
             popReg(sb, "rax")
             popReg(sb, "rbx")
 
             pushReg(sb, "rbx")
             pushReg(sb, "rax")
             pushReg(sb, "rbx")
+            // pushReg(sb, "qword [rsp+8]")
+
         }
         case ^ASTRot: {
             popReg(sb, "rax")
@@ -336,8 +348,8 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // Conditions get flipped due to jumping past the if block
             switch ty.jumpType {
                 case .Eq: nasm(sb, "je if_true_%d", ifNumber)
-                case .Gt: nasm(sb, "jgt if_true_%d", ifNumber)
-                case .Lt: nasm(sb, "jlt if_true_%d", ifNumber)
+                case .Gt: nasm(sb, "jg if_true_%d", ifNumber)
+                case .Lt: nasm(sb, "jl if_true_%d", ifNumber)
                 case .Ne: nasm(sb, "jne if_true_%d", ifNumber)
             }
             if ty.elseBlock != nil {
@@ -351,7 +363,54 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             addLabel(sb, "end_if_%d", ifNumber)
         }
         case ^ASTWhile: {
-            panic("TODO: While Generation\n")
+            idx := ctx.numWhile
+            ctx.numWhile += 1
+            comment(sb, "Begin while %d", idx)
+
+            addLabel(sb, "while_%d_cond", idx)
+            // Remove last element which should be the thing that actually calculates the condition
+            lastElem := pop(&ty.cond)
+            generateNasmFromASTList(sb, ctx, ty.cond)
+
+            // Adapted from if
+            pl, isPl := lastElem.(^ast.ASTPushLiteral)
+            if isPl {
+                b, isBool := pl.(bool)
+                if isBool {
+                    // TODO:
+                    // Can optimize here to either only get if or else block
+                    loadReg(sb, "rax", int(b))
+                    nasm(sb, "cmp rax, 1")
+                } else {
+                    generateNasmFromASTHelp(sb, ctx, &lastElem)
+                }
+            } else {
+                generateNasmFromASTHelp(sb, ctx, &lastElem)
+            }
+
+            // Should end up with cmp value already made
+            // Conditions get flipped due to jumping past the if block
+            switch ty.jumpType {
+                case .Eq: nasm(sb, "jne while_%d_end", idx)
+                case .Gt: nasm(sb, "jle while_%d_end", idx)
+                case .Lt: nasm(sb, "jge while_%d_end", idx)
+                case .Ne: nasm(sb, "je while_%d_end", idx)
+            }
+            //////////  
+
+
+            // Last should generate condition
+            addLabel(sb, "while_%d_body", idx)
+
+            generateNasmFromASTHelp(sb, ctx, &ty.body)
+            // Must re-check so do conditionx`x`
+            nasm(sb, "jmp while_%d_cond", idx)
+
+            addLabel(sb, "while_%d_end", idx)
+
+            comment(sb, "End while %d", idx)
+
+            // panic("TODO: While Generation\n")
         }
     }
     return false

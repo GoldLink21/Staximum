@@ -64,9 +64,11 @@ printType :: proc(t:Type){
 
 printTypes :: proc(ts:[dynamic]Type) {
     fmt.print("[")
-    for t in ts {
+    for t,i in ts {
         printType(t)
-        fmt.println()
+        if i != len(ts) - 1 {
+            fmt.printf(", ")
+        }
     }
     fmt.print("]")
 }

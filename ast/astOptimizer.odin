@@ -97,6 +97,18 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
                         return true
                     }
                 }
+                case .Ge: {
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(ASTPushLiteral)
+                        pl ^= v1 >= v2
+                        ast ^= pl
+                        return true
+                    }
+                }
                 case .Lt: {
                     v1, isInt1 := getInnerLiteralInt(type.lhs)
                     v2, isInt2 := getInnerLiteralInt(type.rhs)
@@ -105,6 +117,18 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
                         free(type)
                         pl := new(ASTPushLiteral)
                         pl ^= v1 < v2
+                        ast ^= pl
+                        return true
+                    }
+                }
+                case .Le: {
+                    v1, isInt1 := getInnerLiteralInt(type.lhs)
+                    v2, isInt2 := getInnerLiteralInt(type.rhs)
+                    if isInt1 && isInt2 {
+                        // Cleanup
+                        free(type)
+                        pl := new(ASTPushLiteral)
+                        pl ^= v1 <= v2
                         ast ^= pl
                         return true
                     }

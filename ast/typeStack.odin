@@ -14,7 +14,7 @@ handleInOutIfValid :: proc(ts:^[dynamic]Type, ins:[]Type, outs:[]Type = {}) -> b
     return true
 }
 expectTransform :: proc(ts:^[dynamic]Type, ins:[]Type, outs:[]Type, loc:util.Location) {
-    expectTypes(ts, ins, loc)
+    expectTypes(ts, ins, "transform", loc)
     for t in outs do pushType(ts, t)
 }
 
@@ -45,12 +45,12 @@ hasTypes :: proc(ts:^[dynamic]Type, types: []Type) -> bool {
 }
 
 // Expects types and pops them
-expectTypes :: proc(ts:^[dynamic]Type, types: []Type, loc:util.Location) -> util.ErrorMsg {
+expectTypes :: proc(ts:^[dynamic]Type, types: []Type, label:string="", loc:util.Location) -> util.ErrorMsg {
     if len(types) == 0 do return nil
     if len(ts) < len(types) {
         return util.locStr(loc, 
-            "Expected %d typed values, but got only %d", 
-            len(types), len(ts))
+            "Expected %d typed values for '%s', but got only %d", 
+            len(types), label,  len(ts))
     }
     for ty in types {
         top := pop(ts)
@@ -58,8 +58,8 @@ expectTypes :: proc(ts:^[dynamic]Type, types: []Type, loc:util.Location) -> util
             s1, _ := fmt.enum_value_to_string(ty)
             s2, _ := fmt.enum_value_to_string(top)
             
-            return util.locStr(loc, "Expected type of '%s' but got '%s'\n", 
-                s1, s2)
+            return util.locStr(loc, "Expected type of '%s' for '%s' but got '%s'\n", 
+                s1, label, s2)
         }
     }
     return nil

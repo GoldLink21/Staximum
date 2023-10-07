@@ -18,6 +18,9 @@ TokenType :: enum {
     Eq,
     Gt,
     Lt,
+    Le,
+    Ge,
+    Ne,
     Let,
     End,
     Rot, // Bot Mid Top => Mid Top Bot
@@ -60,6 +63,9 @@ IdentifierTokens : map[string]TokenType = {
     "<" = .Lt,
     ">" = .Gt,
     "if" = .If,
+    "<=" = .Le,
+    ">=" = .Ge,
+    "!=" = .Ne,
     "+" = .Plus,
     "-" = .Dash,
     "!" = .Bang,
@@ -125,6 +131,9 @@ printToken :: proc(using token:Token) {
         case .Bang:     fmt.printf("<!>")
         case .OBrace:   fmt.printf("<{{>")
         case .If:       fmt.printf("<If")
+        case .Le:       fmt.printf("<<=")
+        case .Ge:       fmt.printf("<>=")
+        case .Ne:       fmt.printf("<!=")
         case .End:      fmt.printf("<End>")
         case .Let:      fmt.printf("<Let>")
         case .Dup:      fmt.printf("<Dup>")

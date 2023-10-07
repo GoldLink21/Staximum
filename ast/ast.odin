@@ -108,7 +108,7 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
                 "Expected an '{{' to start ")
             // Eat {
             next(tw)
-            macro.body = resolveBlock(tw, program, {}, macro.inputs, inputAST) or_return
+            macro.body = resolveBlock(tw, program, {}, macro.inputs, &inputAST) or_return
             if !typesMatch(macro.body.outputTypes, macro.outputs) {
                 return program, util.locStr(macro.defLoc, 
                     "Return type signature of %s did not match actual returns.\nExpected: %s\nGot: %s",
@@ -148,7 +148,7 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
                 "Expected an '{{' to start ")
             // Eat {
             next(tw)
-            procc.body = resolveBlock(tw, program, {}, procc.inputs, inputAST) or_return
+            procc.body = resolveBlock(tw, program, {}, procc.inputs, &inputAST) or_return
             if !typesMatch(procc.body.outputTypes, procc.outputs) {
                 return program, util.locStr(procc.defLoc, 
                     "Return type signature of %s did not match actual returns.\nExpected: %s\nGot: %s",
@@ -275,22 +275,26 @@ resolveTypes :: proc(tw:^TokWalk, out :^[dynamic]Type, name:string="", genAST :=
     return output
 }
 // Grabs all tokens until a closing block is found
-resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variable, inTypes:[dynamic]Type, inAST:[dynamic]AST) -> (block:^ASTBlock, err:ErrorMsg) {
+resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variable, inTypes:[dynamic]Type, inAST:^[dynamic]AST) -> (block:^ASTBlock, err:ErrorMsg) {
     block = new(ASTBlock)
     block.nodes = make([dynamic]AST)
     // Import astNodes
     if inAST != nil {
-        for a in inAST {
+        for &a in inAST {
             append(&block.nodes, a)
         }
+        // Empty the output
+        clear(inAST)
     }
     block.state = {
         make(map[string]Variable)
     }
+    // Clone over vars
     for k, &v in inVars {
         block.state.vars[k] = v
     }
     block.outputTypes = make([dynamic]Type)
+    // Clone over types. 
     if inTypes != nil {
         for it in inTypes {
             append(&block.outputTypes, it)
@@ -298,6 +302,7 @@ resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variabl
     }
     // Type stack
     ts := &block.outputTypes
+
     out := &block.nodes
     vars := &block.state.vars
     for curOk(tw) {
@@ -356,12 +361,24 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             append(curAST, eq)
         }
         case .Gt: { 
-            gt := resolveBinOp(curAST, ts, cur, ">", .Gt,{.Int, .Int}, .Bool) or_return
+            gt := resolveBinOp(curAST, ts, cur, ">", .Gt, {.Int, .Int}, .Bool) or_return
             append(curAST, gt)
+        }
+        case .Ge: {
+            ge := resolveBinOp(curAST, ts, cur, ">=", .Ge, {.Int, .Int}, .Bool) or_return
+            append(curAST, ge)
         }
         case .Lt: { 
             lt := resolveBinOp(curAST, ts, cur, "<", .Lt, {.Int, .Int}, .Bool) or_return
             append(curAST, lt)
+        }
+        case .Le: {
+            le := resolveBinOp(curAST, ts, cur, "<=", .Le, {.Int, .Int}, .Bool) or_return
+            append(curAST, le)
+        }
+        case .Ne: {
+            eq := resolveBinOp(curAST, ts, cur, "!=", .Ne, {.Int, .Int}, .Bool) or_return
+            append(curAST, eq)
         }
         case .Exit: {
             expectArgs(curAST^, ts, "exit", 
@@ -486,12 +503,75 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             return {}, nil
         }
         case .While: {
+            fmt.printf("Startig while\n")
             while := new(ASTWhile)
             while.inputTypes = types.cloneTypeStack(ts^)
-            while.cond = resolveIfCond(tw, ts, program, vars, curAST) or_return
-            resolveNextToken(tw, ts, program, vars, curAST) or_return            
-            while.body = pop(curAST)
-            return {}, nil//"while AST TODO\n"
+            fmt.printf("  Expected: ")
+            types.printTypes(while.inputTypes)
+            fmt.println()
+            next(tw)
+            while.cond = resolveWhileCond(tw, ts, program, vars) or_return
+            // Expect a boolean on top
+            expectTypes(ts, {.Bool}, "while", cur.loc) or_return
+            // Setting jump type
+            #partial switch condType in while.cond[len(while.cond) - 1] {
+                case ^ASTBinOp: {
+                    // Types should be flipped. Jump to end afterwards
+                    #partial switch condType.op {
+                        // Plus, Minus, Eq, Ne, Lt,Gt 
+                        case .Eq: while.jumpType = .Eq
+                        case .Ne: while.jumpType = .Ne
+                        case .Lt: while.jumpType = .Lt
+                        case .Gt: while.jumpType = .Gt
+                        case: return {}, 
+                            "Invalid binary expression for if statement"
+                    }
+                }
+                case ^ASTPushLiteral:{
+                    // Should always be of type bool
+                    b := condType.(bool)
+                    while.jumpType = .Eq
+                }
+                case:{
+                    return {}, "Invalid type for ending if statement\n"
+                }
+            }
+            // popType(ts)
+            fmt.printf("  Has in cond: ")
+            types.printTypes(while.inputTypes)
+            fmt.println()
+
+            // Need to pass in new input types again to body
+            newIn := generateInputsFromTypes(ts^)
+            // Get the body
+            // Must have block
+            if curr(tw).type != .OBrace {
+                return nil, "`while ... then` expects a block to follow it\n"
+            }
+            next(tw)
+            bl := resolveBlock(tw, program, vars^, ts^, &newIn) or_return
+            //resolveNextToken(tw, ts, program, vars, &newIn) or_return 
+            clear(ts)
+            delete(newIn)
+
+            while.body = bl
+
+            fmt.printf("  Got from body: ")
+            types.printTypes(ts^)
+            fmt.println()
+
+            // New output types are the output from the while block
+            
+
+            if !typesMatch(while.inputTypes, bl.outputTypes) {
+                return {}, util.locStr(cur.loc, 
+                    "While output types should be the same as the input types")
+            }
+            clear(ts)
+            for t in bl.outputTypes {
+                append(ts, t)
+            }
+            append(curAST, while)
         }
         case .End: { 
             return {}, "end AST TODO"
@@ -584,7 +664,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 // Macro
                 mac : ^Macro = program.macros[varName]
                 // Check input types
-                expectTypes(ts, mac.inputs[:], cur.loc) or_return
+                expectTypes(ts, mac.inputs[:], "macro inputs", cur.loc) or_return
                 newBody := AST(mac.body)
                 newBody = cloneAST(&newBody)
                 replaceInputsWithVals(&newBody, varName, curAST, len(mac.inputs), true) 
@@ -656,7 +736,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
         }
         case .OBrace: {
             next(tw)
-            block := resolveBlock(tw, program, vars^, nil, nil) or_return
+            block := resolveBlock(tw, program, vars^, ts^, curAST) or_return
             // Make sure the block is not empty
             if len(block.nodes) > 0 {
                 for t in block.outputTypes {
@@ -671,7 +751,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             return {.If}, nil
         }
         case .Else: {
-            //return {}, "Cannot have an else without an if statement\n"
+            return {}, "Cannot have an else without an if statement\n"
         }
         case .CBrace: {
             return {.Block}, nil
@@ -686,7 +766,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             // Var read
             // x @ // gives value of x
             last := popNoDrop(curAST)
-            expectTypes(ts, {.Ptr}, cur.loc) or_return
+            expectTypes(ts, {.Ptr}, "var read",cur.loc) or_return
             varRef, isVarRef := last.(^ASTVarRef)
             if isVarRef {
                 // Handle reading the data
@@ -837,7 +917,9 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
             replaceInputsWithVals(&type.body, name, curAST, numInputs)
         }
         case ^ASTWhile: {
-            replaceInputsWithVals(&type.cond, name, curAST, numInputs)
+            for &v in type.cond {
+                replaceInputsWithVals(&v, name, curAST, numInputs)
+            }
             replaceInputsWithVals(&type.body, name, curAST, numInputs)
         }
         case ^ASTVarRead: {}
@@ -857,20 +939,21 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
 }
 
 // Used for while loops to allow AST gen
-generateInputsFromTypes :: proc(ts:[dynamic]Type) -> [dynamic]^ASTInputParam {
-    out := make([dynamic]^ASTInputParam)
-    for i in ts {
+generateInputsFromTypes :: proc(ts:[dynamic]Type) -> [dynamic]AST {
+    out := make([dynamic]AST)
+    // assert(out != nil)
+    for t in ts {
         ip := new(ASTInputParam)
-        ip.from = ""
-        ip.type = ts[i]
-        append(&out, ip) 
+        ip.from = "while"
+        ip.type = t
+        ipAST : AST = ip
+        append(&out, ipAST) 
     }
     return out
 }
 
 resolveIfCond :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable, curAST:^[dynamic]AST) -> (block:AST, err:ErrorMsg) {
     // Go until you are told to end the if
-    blockAST := make([dynamic]AST)
     for !(.If in (resolveNextToken(tw, ts, program, vars, curAST) or_return)){
 
     }
@@ -880,6 +963,25 @@ resolveIfCond :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:
     }
     popType(ts)
     return popNoDrop(curAST), nil
+}
+
+resolveWhileCond :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, vars:^map[string]Variable) -> (out:[dynamic]AST, err:ErrorMsg) {
+    newAST := make([dynamic]AST)
+    // Setup pseudo inputs which generate nothing
+    // TODO: Does this need to be here
+    /*
+    for t in ts {
+        fmt.printf("Generating input of %s\n", types.TypeToString[t])
+
+        input := new(ASTInputParam)
+        input.from = ""
+        input.type = t
+        input.index = -1
+        append(&newAST, input)
+    }*/
+    for !(.If in (resolveNextToken(tw, ts, program, vars, &newAST) or_return)){}
+    // Go until you need to escape
+    return newAST, nil
 }
 
 resolveIntLit :: proc(ts:^[dynamic]Type, intLit:Token) -> (^ASTPushLiteral, util.ErrorMsg) {
@@ -908,8 +1010,8 @@ resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token, opName:
     expectArgs(curAST^, ts, opName, inTypes, tok.loc) or_return
     pushType(ts, outType)
     value := new(ASTBinOp)
-    value.lhs = pop(curAST)
     value.rhs = pop(curAST)
+    value.lhs = pop(curAST)
     value.op = opType
     return value, nil
 }
@@ -1015,5 +1117,5 @@ expectArgs :: proc(out : [dynamic]AST, ts:^[dynamic]Type, label:string, types:[]
             (len(types))==1?"":"s"
         )
     }
-    return expectTypes(ts, types, loc)
+    return expectTypes(ts, types, label, loc)
 }
