@@ -15,7 +15,8 @@ optimizeASTProgram :: proc(program: ^ASTProgram) -> ^ASTProgram {
     for _, pr in program.procs {
         optimizeASTBlock(pr.body, true)
     }
-    hoistVarDecls(program)
+    // Since it's required, moved over to resolveProgram
+    // hoistVarDecls(program)
     return program
 }
 
@@ -255,6 +256,8 @@ hoistVarDeclsBlock :: proc(blk : ^ASTBlock) {
             case ^ASTBlock: {
                 // TODO:
                 hoistVarDeclsBlock(type)
+                // Remove all inner ones and push up
+
             }
             case ^ASTVarDecl: {
                 // Move to top after any other varDecls

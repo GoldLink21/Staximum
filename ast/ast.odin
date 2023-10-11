@@ -18,6 +18,11 @@ SYS_WRITE :: 1
 
 ASTState :: struct {
     vars: map[string]Variable,
+    // Different than len(vars) as it accounts for 
+    //  the max number of variables in any sub-block
+    totalVars:int,
+    // Space for variables is allocated only at the beginning of
+    //  a proc
 }
 
 AST :: union {
@@ -83,6 +88,7 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
             cur, ok = next(tw)
             if !ok { return program, "Expected Identifier\n" }
             macroName := cur.value.(string)
+            fmt.printf("Parsing macro '%s'\n", macroName)
             macro.defLoc = cur.loc
             if macroName in program.macros {
                 return program, util.locStr(cur.loc, 
@@ -214,20 +220,19 @@ resolveProgram :: proc(tw:^TokWalk, includedFiles: [dynamic]string = nil) -> (pr
             tw.i -= 1
         } else {
             return program, util.locStr(cur.loc, 
-                "Global scope can only include macro and proc statements")
+                "Global scope can only include macro proc, let, and import statements")
         }
     }
+    hoistVarDecls(program)
     return program, nil
 }
 
 // Places a variable can be defined
-NameLocs :: enum {
-    Macro, Proc, LocalVar, GlobalVar,
-}
+NameLocs :: enum { MacroL = 1, Proc, LocalVar, GlobalVar }
 
 // Checks if a name is already used in macros, procs or variables
 nameExists :: proc(name:string, program:^ASTProgram, localVars:^map[string]Variable = nil) -> NameLocs {
-    if name in program.macros do return .Macro
+    if name in program.macros do return .MacroL
     if name in program.procs do return .Proc
     if name in program.globalVars do return .GlobalVar
     if localVars != nil && name in localVars do return .LocalVar
@@ -287,7 +292,8 @@ resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variabl
         clear(inAST)
     }
     block.state = {
-        make(map[string]Variable)
+        make(map[string]Variable),
+        len(inVars)
     }
     // Clone over vars
     for k, &v in inVars {
@@ -311,6 +317,15 @@ resolveBlock :: proc(tw:^TokWalk, program:^ASTProgram, inVars:map[string]Variabl
             return block, nil
         }
     }
+    // Calculate number of vars needed
+    maxVars := len(vars)
+    for n in out {
+        bl, isBlock := n.(^ASTBlock)
+        if isBlock {
+            maxVars = max(maxVars, len(bl.state.vars))
+        }
+    }
+    block.state.totalVars = maxVars
     return block, "Reached end of input without closing block\n"
 }
 
@@ -648,7 +663,9 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             // raw ident should give the value from variable
             varName := cur.value.(string)
             loc := nameExists(varName, program, vars)
+            fmt.println(loc)
             if loc == nil {
+                fmt.printf("%s is macro: %s\n",varName, varName in program.macros ? "true" : "false")
                 return nil, util.locStr(cur.loc, 
                     "Unknown identifier of '%s'", varName)
             }
@@ -660,7 +677,7 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 pushType(ts, .Ptr)
                 (&vars[varName]).used = true
                 append(curAST, varRef)
-            } else if loc == .Macro {
+            } else if loc == .MacroL {
                 // Macro
                 mac : ^Macro = program.macros[varName]
                 // Check input types
@@ -682,6 +699,11 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 call := new(ASTProcCall)
                 call.ident = varName
                 call.nargs = len(program.procs[varName].inputs)
+                procc := program.procs[varName]
+                expectArgs(curAST^, ts, varName, procc.inputs[:], cur.loc) or_return
+                for t := len(procc.outputs) - 1; t >= 0; t -= 1 {
+                    append(ts, procc.outputs[t])
+                }
                 append(curAST, call)
             } else if loc == .GlobalVar {
                 // Global Variable

@@ -41,15 +41,40 @@ generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
     os.write_string(fd, generateNasmFromProgram(program))
 }
 
+generateProcCall :: proc(sb: ^strings.Builder, procName:string, program:^ast.ASTProgram) {
+    comment(sb, "Call to '%s'", procName)
+    if procName not_in program.procs {
+        panic("Cannot generate proc call for proc that doesn't exist\n")
+    }
+    procc := program.procs[procName]
+    nVars := procc.body.state.totalVars
+    if nVars != 0 {
+        nasm(sb, "add rsp, %d", nVars * 8)
+    }
+    nInputs := len(procc.inputs) 
+    if nInputs != 0 {
+        assert(nInputs <= len(paramRegs))
+        comment(sb, "Setting up inputs for proc")
+        for i := nInputs - 1; i >= 0; i -= 1 {
+            popReg(sb, paramRegs[i])
+        }
+    }
+    nasm(sb, "call %s", procName)
+    // Pop is handled at the end of procs to allow setting up
+    //  the return values
+    // nasm(sb, "pop rbp")
+}
+
 // Takes an ASTProgram and generates nasm for it
 generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     sb: strings.Builder
     strings.write_string(&sb, 
         "section .text\nglobal _start\n_start:\n")
-    
-    
+        // Reserve space on stack for vars
+        // fmt.sbprintf(&sb, "")        
     generateGlobalValues(&sb, nil, program)
-    nasm(&sb, "call main")
+
+    generateProcCall(&sb, "main", program)
     // Exit with 0
     comment(&sb, "Safe exit")
     strings.write_string(&sb, "   mov rax, 60\n   mov rdi, 0\n   syscall\n")
@@ -67,11 +92,25 @@ generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     for name,pr in program.procs {
         // TODO: Conform to some calling convention
         fmt.printf("Generating Proc %s\n", name)
-        strings.write_string(&sb,name)
-        strings.write_string(&sb, ":\n")
+        fmt.sbprintf(&sb, "%s:\n", name)
+        comment(&sb, "Reserve space for vars")
+        pushReg(&sb, "rbp")
+        nasm(&sb, "mov rbp, rsp")
+        comment(&sb, "Pushing input values")
+        //for i := len(pr.inputs) - 1; i >= 0; i -= 1 {
+        for i in 0..<len(pr.inputs) {
+            pushReg(&sb, paramRegs[i])
+        }
         a : ast.AST = pr.body
-        generateNasmFromASTHelp(&sb, ctx, &a)
-        strings.write_string(&sb, "   ret\n")
+        generateNasmFromASTHelp(&sb, ctx, &a, false, program)
+        comment(&sb, "Save output params into regs") 
+        // ! Should this be reversed?
+        for i := len(pr.outputs) - 1; i >= 0; i -= 1 {
+            popReg(&sb, paramRegs[i])
+        }
+
+        nasm(&sb, "pop rbp")
+        nasm(&sb, "ret")
     }
     generateDataSection(&sb, ctx)
     generateBSSSection(&sb, ctx, program)
@@ -95,15 +134,15 @@ getFloatLabel :: proc(ctx:^ASMContext, flt:f64) -> string {
     return ctx.floatLits[flt]
 }
 
-generateNasmFromASTList :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: [dynamic]ast.AST, inDrop:=false) -> (didDrop:bool = false) {
+generateNasmFromASTList :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: [dynamic]ast.AST, inDrop:=false, program:^ast.ASTProgram) -> (didDrop:bool = false) {
     for &a in as {
-        generateNasmFromASTHelp(sb, ctx, &a, false)
+        generateNasmFromASTHelp(sb, ctx, &a, false, program)
     }
     return false
 }
 
 // Recursively traverse to generate nasm
-generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST, inDrop:=false) -> (didDrop:bool = false) {
+generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.AST, inDrop:=false, program:^ast.ASTProgram) -> (didDrop:bool = false) {
     using ast
     switch ty in as {
         case ^ASTPushLiteral: {
@@ -129,7 +168,8 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         case ^ASTBinOp:{
             shortcutLits(sb, ctx,
                 &ty.lhs, "rax",
-                &ty.rhs, "rbx")
+                &ty.rhs, "rbx", 
+                program)
             switch ty.op {
                 case .Plus: {
                     nasm(sb, "add rax, rbx")
@@ -152,7 +192,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         }
         case ^ASTSyscall0: {
             shortcutLit(sb, ctx,
-                &ty.call, "rax")
+                &ty.call, "rax", program)
             nasm(sb, "syscall ; 0 args")
             if inDrop {
                 return true
@@ -162,7 +202,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         case ^ASTSyscall1: {
             shortcutLits(sb, ctx,
                 &ty.arg1, "rdi", 
-                &ty.call, "rax")
+                &ty.call, "rax", program)
             nasm(sb, "syscall ; 1 arg")
             if inDrop {
                 comment(sb, "Dropped push rax")
@@ -172,7 +212,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         }
         case ^ASTSyscall2: {
             // TODO: Optimize later using shortcuts
-            shortcutAllLiterals(sb, ctx, 
+            shortcutAllLiterals(sb, ctx, program,
                 {&ty.call, "rax"},
                 {&ty.arg1, "rdi"},
                 {&ty.arg2, "rsi"})
@@ -184,7 +224,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             pushReg(sb, "rax")
         }
         case ^ASTSyscall3: {
-            shortcutAllLiterals(sb, ctx, 
+            shortcutAllLiterals(sb, ctx, program,
                 {&ty.call, "rax"},
                 {&ty.arg1, "rdi"},
                 {&ty.arg2, "rsi"},
@@ -216,7 +256,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             comment(sb, "{{")
             // Start after all var decls
             for i := numDecls; i < len(ty.nodes); i += 1 {
-                generateNasmFromASTHelp(sb, ctx, &ty.nodes[i])
+                generateNasmFromASTHelp(sb, ctx, &ty.nodes[i], false, program)
             }
             // Now clean up stack from variable space
             // comment(sb, "Cleanup base pointer")
@@ -225,7 +265,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
         }
         case ^ASTDrop: {
             // Move the stack pointer back to ignore the value that was there
-            if !generateNasmFromASTHelp(sb, ctx, &ty.value, true) {
+            if !generateNasmFromASTHelp(sb, ctx, &ty.value, true, program) {
                 // Was not able to shortcut the drop
                 comment(sb, "Drop")
                 nasm(sb, "add rsp,8")
@@ -241,23 +281,23 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             panic("BUG: AST Var Decl should be skipped in AST Block\n")
         }
         case ^ASTInputParam: {
+            // Value should already be pushed
             if ty.from == "while" {
                 // This means for a while loop
                 comment(sb, "While input")
                 return
-            }
-            when true do assert(false, "ASM Input params for procs")
-            if ty.index < len(paramRegs) {
-                // Use register to call
-                comment(sb, "Input param %d", ty.index)
-                pushReg(sb, paramRegs[ty.index])
+            } else {
+                comment(sb, "Input param %d for '%s'", ty.index, ty.from)
                 return
             }
-            assert(false, "TODO asm input param after 5\n")
         }
         case ^ASTProcCall: {
-            // Load registers in order 
-            assert(false, "TODO: AST proc call\n")
+            generateProcCall(sb, ty.ident, program)
+            comment(sb, "Get saved return values from registers")
+            pr := program.procs[ty.ident]
+            for i in 0..<len(pr.outputs) {
+                pushReg(sb, paramRegs[i])
+            }
         }
         case ^ASTDup: {
             // popReg(sb, "rax")
@@ -271,14 +311,14 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             pushReg(sb, "rax")
         } 
         case ^ASTOver:{
-            
+            /*
             popReg(sb, "rax")
             popReg(sb, "rbx")
 
             pushReg(sb, "rbx")
             pushReg(sb, "rax")
-            pushReg(sb, "rbx")
-            // pushReg(sb, "qword [rsp+8]")
+            pushReg(sb, "rbx")*/
+            pushReg(sb, "qword [rsp+8]")
 
         }
         case ^ASTRot: {
@@ -314,15 +354,14 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             comment(sb, "Write to %s", ty.ident)
             if ty.isGlobal {
                 shortcutLit(sb, ctx, &ty.value, 
-                    fmt.tprintf("qword [%s]", ctx.globalVars[ty.ident].label))
+                    fmt.tprintf("qword [%s]", ctx.globalVars[ty.ident].label), program)
                 //nasm(sb, "mov [%s], rax", ctx.globalVars[ty.ident].label)
             } else {
                 // Generate value to write
-                shortcutLit(sb, ctx, &ty.value, "rax")
+                shortcutLit(sb, ctx, &ty.value, "rax", program)
                 nasm(sb, "mov [rbp-%d], rax", (ctx.blockVars[ty.ident] + 1) * 4)
             }
         }
-
         case ^ASTIf: {
             ctx.numIf += 1
             ifNumber := ctx.numIf
@@ -338,10 +377,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                     loadReg(sb, "rax", int(b))
                     nasm(sb, "cmp rax, 1")
                 } else {
-                    generateNasmFromASTHelp(sb, ctx, &ty.cond)
+                    generateNasmFromASTHelp(sb, ctx, &ty.cond, false, program)
                 }
             } else {
-                generateNasmFromASTHelp(sb, ctx, &ty.cond)
+                generateNasmFromASTHelp(sb, ctx, &ty.cond, false, program)
             }
 
             // Should end up with cmp value already made
@@ -354,12 +393,12 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             }
             if ty.elseBlock != nil {
                 comment(sb, "Begin Else %d", ifNumber)
-                generateNasmFromASTHelp(sb, ctx, &ty.elseBlock, false)
+                generateNasmFromASTHelp(sb, ctx, &ty.elseBlock, false, program)
             }
             nasm(sb, "jmp end_if_%d", ifNumber)
             addLabel(sb, "if_true_%d", ifNumber)
             // Write if block
-            generateNasmFromASTHelp(sb, ctx, &ty.body, false)
+            generateNasmFromASTHelp(sb, ctx, &ty.body, false, program)
             addLabel(sb, "end_if_%d", ifNumber)
         }
         case ^ASTWhile: {
@@ -370,7 +409,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             addLabel(sb, "while_%d_cond", idx)
             // Remove last element which should be the thing that actually calculates the condition
             lastElem := pop(&ty.cond)
-            generateNasmFromASTList(sb, ctx, ty.cond)
+            generateNasmFromASTList(sb, ctx, ty.cond, false, program)
 
             // Adapted from if
             pl, isPl := lastElem.(^ast.ASTPushLiteral)
@@ -382,10 +421,10 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
                     loadReg(sb, "rax", int(b))
                     nasm(sb, "cmp rax, 1")
                 } else {
-                    generateNasmFromASTHelp(sb, ctx, &lastElem)
+                    generateNasmFromASTHelp(sb, ctx, &lastElem, false, program)
                 }
             } else {
-                generateNasmFromASTHelp(sb, ctx, &lastElem)
+                generateNasmFromASTHelp(sb, ctx, &lastElem, false, program)
             }
 
             // Should end up with cmp value already made
@@ -402,7 +441,7 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             // Last should generate condition
             addLabel(sb, "while_%d_body", idx)
 
-            generateNasmFromASTHelp(sb, ctx, &ty.body)
+            generateNasmFromASTHelp(sb, ctx, &ty.body, false, program)
             // Must re-check so do conditionx`x`
             nasm(sb, "jmp while_%d_cond", idx)
 
@@ -436,18 +475,18 @@ loadRegWithLit :: proc(sb:^strings.Builder, ctx:^ASMContext, reg:string, lit:^as
 }
 
 // Gets an int into a register from AST. Will generate more if it needs to
-shortcutLit :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:string) -> bool {
+shortcutLit :: proc(sb: ^strings.Builder, ctx:^ASMContext, as: ^ast.AST, reg:string, program:^ast.ASTProgram) -> bool {
     if lit1, isLit := as.(^ast.ASTPushLiteral); isLit {
         loadRegWithLit(sb, ctx, reg, lit1)
         return true
     }
-    generateNasmFromASTHelp(sb, ctx, as)
+    generateNasmFromASTHelp(sb, ctx, as, false, program)
     popReg(sb, reg)
     return false
 }
 
 // Gets two ints into registers by either immediate value or generating on the stack
-shortcutLits :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:string, ast2: ^ast.AST, reg2:string) {
+shortcutLits :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:string, ast2: ^ast.AST, reg2:string, program:^ast.ASTProgram) {
     lit1, isLit1 := ast1.(^ast.ASTPushLiteral)
     lit2, isLit2 := ast2.(^ast.ASTPushLiteral)
     if isLit1 {
@@ -457,20 +496,20 @@ shortcutLits :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:
             loadRegWithLit(sb, ctx, reg2, lit2)
         } else {
             // Generate second then pop second and load first 
-            generateNasmFromASTHelp(sb, ctx, ast2)
+            generateNasmFromASTHelp(sb, ctx, ast2, false, program)
             popReg(sb, reg2)
             loadRegWithLit(sb, ctx, reg1, lit1)
         }
     } else {
         if isLit2 {
             // Generate first then pop first and load second 
-            generateNasmFromASTHelp(sb, ctx, ast1)
+            generateNasmFromASTHelp(sb, ctx, ast1, false, program)
             popReg(sb, reg1)
             loadRegWithLit(sb, ctx, reg2, lit2)
         } else {
             // Generate both
-            generateNasmFromASTHelp(sb, ctx, ast1)
-            generateNasmFromASTHelp(sb, ctx, ast2)
+            generateNasmFromASTHelp(sb, ctx, ast1, false, program)
+            generateNasmFromASTHelp(sb, ctx, ast2, false, program)
     
             popReg(sb, reg2)
             popReg(sb, reg1)
@@ -479,7 +518,7 @@ shortcutLits :: proc(sb: ^strings.Builder, ctx:^ASMContext, ast1:^ast.AST, reg1:
 }
 
 // Loads many registers with immediate values if possible
-shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{ast:^ast.AST,reg:string}) {
+shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, program:^ast.ASTProgram, rest:..struct{ast:^ast.AST,reg:string}) {
     // Values that can be loaded directly are done after
     indiciesForLoad := make([dynamic]int)
     defer delete(indiciesForLoad)
@@ -491,7 +530,7 @@ shortcutAllLiterals :: proc(sb:^strings.Builder, ctx:^ASMContext, rest:..struct{
             append(&indiciesForLoad, i)
         } else {
             // Pushes values that aren't immediately literals
-            generateNasmFromASTHelp(sb, ctx, asReg.ast)
+            generateNasmFromASTHelp(sb, ctx, asReg.ast, false, program)
         }
     }
     // Tracks which index in the indicies for load to use
@@ -597,7 +636,7 @@ generateGlobalValues :: proc(sb:^strings.Builder, ctx:^ASMContext, program:^ast.
     comment(sb, "Setting up global var values")
     for k, &v in program.globalVars {
         shortcutLit(sb, ctx, &v.value, 
-            fmt.tprintf("qword [%s]", program.globalVars[k].label))
+            fmt.tprintf("qword [%s]", program.globalVars[k].label), program)
         // nasm(sb, "mov [global_%s], rax", k)
     }
 }

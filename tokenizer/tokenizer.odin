@@ -100,12 +100,14 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                 next(&tok)
                 for curGood(&tok) {
                     toSkip, _ := next(&tok)
-                    if toSkip == '*' && curIs(&tok, '/') {
+                    if toSkip == '*' && nextIs(&tok, '/') {
+                        next(&tok)
                         nestLevel -= 1
                         if nestLevel == 0 do break
-                    } else if toSkip == '/' && curIs(&tok, '*') {
+                    } else if toSkip == '/' && nextIs(&tok, '*') {
+                        fmt.printf("Increased comment block\n")
                         nestLevel += 1
-                    }
+                    }                    
                 }
             }
             
