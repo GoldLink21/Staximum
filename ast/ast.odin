@@ -41,6 +41,7 @@ AST :: union {
     ^ASTVarWrite,
     ^ASTVarDecl,
     ^ASTProcCall,
+    ^ASTProcReturn,
     ^ASTIf,
     ^ASTWhile,
     ^ASTDup,
@@ -264,19 +265,28 @@ typesMatch :: proc(ts1, ts2:[dynamic]Type) -> bool {
 
 // Reads all the next type tokens and puts them into the given buffer
 resolveTypes :: proc(tw:^TokWalk, out :^[dynamic]Type, name:string="", genAST := false) -> (output:[dynamic]AST = nil) {
+    FRONT :: false
     if genAST do output = make([dynamic]AST)
     i := 0
     for type, hasType := tryNext(tw, .Type); hasType; type, hasType = tryNext(tw, .Type) {
-        append(out, type.value.(types.Type))
+        when FRONT {
+            inject_at(out, 0, type.value.(types.Type))
+        } else {
+            append(out, type.value.(types.Type))
+        }
         if genAST {
             input := new(ASTInputParam)
             input.type = type.value.(types.Type)
             input.index = i
             input.from = name
-            append(&output, input)
+            when FRONT {
+                inject_at(&output, 0, input)
+            } else {
+                append(&output, input)
+            }
             i += 1
         }
-    }
+    }    
     return output
 }
 // Grabs all tokens until a closing block is found
@@ -588,9 +598,6 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             }
             append(curAST, while)
         }
-        case .End: { 
-            return {}, "end AST TODO"
-        }
         case .Let: { 
             letDef, setVar := resolveLet(cur.loc, tw, ts, vars, program, curAST) or_return
             append(curAST, letDef)
@@ -663,7 +670,6 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             // raw ident should give the value from variable
             varName := cur.value.(string)
             loc := nameExists(varName, program, vars)
-            fmt.println(loc)
             if loc == nil {
                 fmt.printf("%s is macro: %s\n",varName, varName in program.macros ? "true" : "false")
                 return nil, util.locStr(cur.loc, 
@@ -701,7 +707,13 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
                 call.nargs = len(program.procs[varName].inputs)
                 procc := program.procs[varName]
                 expectArgs(curAST^, ts, varName, procc.inputs[:], cur.loc) or_return
-                for t := len(procc.outputs) - 1; t >= 0; t -= 1 {
+                for t := 0; t < len(procc.outputs); t += 1 {
+                    // Add in placeholder ASTNodes for the types
+                    procRet := new(ASTProcReturn)
+                    procRet.type = procc.outputs[t]
+                    procRet.from = varName
+                    procRet.index = t
+                    append(curAST, procRet)
                     append(ts, procc.outputs[t])
                 }
                 append(curAST, call)
@@ -870,6 +882,13 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             popType(ts)
             pushType(ts, newType)
         }
+        case .QQQ: {
+            // Stop parsing and output current type stack
+            fmt.printf("INFO: type stack bottom ")
+            types.printTypes(ts^)
+            fmt.printf(" top\nQuiting Execution\n")
+            os.exit(1)
+        }
     }
     next(tw)
     return {}, nil
@@ -947,7 +966,7 @@ replaceInputsWithVals :: proc(block:^AST, name:string, curAST:^[dynamic]AST, num
         case ^ASTVarRead: {}
         case ^ASTVarWrite: {}
         // No traversal
-        case ^ASTPushLiteral, ^ASTVarRef, ^ASTProcCall: {}
+        case ^ASTPushLiteral, ^ASTVarRef, ^ASTProcCall, ^ASTProcReturn: {}
         case ^ASTNip, ^ASTOver, ^ASTRot, ^ASTSwap, ^ASTDup: {}
 
 
@@ -1029,6 +1048,7 @@ resolveStringLit :: proc(ts:^[dynamic]Type, strLit:Token) -> (^ASTPushLiteral, ^
 }
 resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token, opName:string, opType:ASTBinOps, inTypes:[]Type, outType:Type) -> (op:^ASTBinOp, err:ErrorMsg) {
     // Requires 2 things on the stack
+    // expectTypes(ts, inTypes, opName, tok.loc) or_return
     expectArgs(curAST^, ts, opName, inTypes, tok.loc) or_return
     pushType(ts, outType)
     value := new(ASTBinOp)
@@ -1132,12 +1152,13 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk,
 
 // Will eat types passed in
 expectArgs :: proc(out : [dynamic]AST, ts:^[dynamic]Type, label:string, types:[]Type, loc:tokenizer.Location) -> util.ErrorMsg {
+    /* // This part isn't valid considering proc calls or block scopes
     if len(out) < len(types) {
         return util.locStr(loc, 
-            "%s requries %d argument%s", 
+            "%s requires %d argument%s", 
             label, len(types), 
             (len(types))==1?"":"s"
         )
-    }
+    }*/
     return expectTypes(ts, types, label, loc)
 }

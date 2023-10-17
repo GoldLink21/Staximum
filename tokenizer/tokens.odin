@@ -22,10 +22,10 @@ TokenType :: enum {
     Ge,
     Ne,
     Let,
-    End,
     Rot, // Bot Mid Top => Mid Top Bot
     Dup, // Top => Top, Top
     Nip, // Mid, Top => Top
+    QQQ, // ??? Shows current type stack
     Exit,
     Plus,
     Dash,
@@ -71,10 +71,10 @@ IdentifierTokens : map[string]TokenType = {
     "!" = .Bang,
     ":" = .Colon,
     "let" = .Let,
-    "end" = .End,
     "dup" = .Dup,
     "nip" = .Nip,
     "rot" = .Rot,
+    "???" = .QQQ,
     "(" = .OParen,
     ")" = .CParen,
     "{" = .OBrace,
@@ -96,6 +96,7 @@ IdentifierTokens : map[string]TokenType = {
     "syscall3" = .Syscall3,
 }
 
+// splitsToken :: bit_set['a','b']
 
 // Possible Values for a token
 TokenValue :: union {
@@ -134,11 +135,11 @@ printToken :: proc(using token:Token) {
         case .Le:       fmt.printf("<<=")
         case .Ge:       fmt.printf("<>=")
         case .Ne:       fmt.printf("<!=")
-        case .End:      fmt.printf("<End>")
         case .Let:      fmt.printf("<Let>")
         case .Dup:      fmt.printf("<Dup>")
         case .Nip:      fmt.printf("<Nip>")
         case .Rot:      fmt.printf("<Rot>")
+        case .QQQ:      fmt.printf("<???>")
         case .Swap:     fmt.printf("<Swap>")
         case .Over:     fmt.printf("<Over>")
         case .Drop:     fmt.printf("<Drop>")

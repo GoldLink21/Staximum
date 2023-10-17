@@ -6,9 +6,8 @@ import proc1 proc2 from "library"
 //  an InputTypes and returns an OutputTypes
 macro Name : InputTypes > OutputTypes {
     InnerTokens
-    1 2 + 3 = if {
+    if 1 2 + 3 = then {
 
-        // Not sure about else if yet
     } else {
 
     }
@@ -30,7 +29,7 @@ macro PI > float {
 
 macro add : int int > int {
     // Variable Declaration
-    let x {
+    let x = {
         // Requires 1 return value
         1 2 +
     }

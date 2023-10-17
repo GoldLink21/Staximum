@@ -37,6 +37,10 @@ main :: proc() {
         fmt.printf("%s", err.(string))
         os.exit(1)
     }
+    if len(tokens) == 0 {
+        fmt.printf("Error: There were no tokens to resolve\n")
+        os.exit(1)
+    }
     fmt.printf("v---Tokenized Program---v\n")
     tokenizer.printTokens(tokens[:])
     fmt.printf("^-----------------------^\n")

@@ -58,6 +58,11 @@ ASTInputParam :: struct {
     index:int,
     from:string,
 }
+ASTProcReturn :: struct {
+    type: types.Type,
+    index: int,
+    from: string,
+}
 /* Syscalls are broken up into how many arguments they have.
     This may seem bad, but with at most 7, it removes all 
     ambiguity with how many params to use for syscall*/
@@ -348,6 +353,10 @@ printASTHelper :: proc(ast: AST, sb:^strings.Builder, inList:=false, indent:=0) 
             fmt.sbprintf(sb, "! %s'%s' {{\n", ty.isGlobal?"global ":"", ty.ident)
             printASTHelper(ty.value, sb, false, indent + 1)
         }
+        case ^ASTProcReturn: {
+            fmt.sbprintf(sb, "return %d from '%s'\n", ty.index, ty.from)
+            return
+        }
     }
     for i in 0..<indent do strings.write_byte(sb, ' ')
     strings.write_string(sb, "}\n")
@@ -539,6 +548,13 @@ cloneAST :: proc(ast:^AST) -> AST{
             varWrite.isGlobal = type.isGlobal
             out = varWrite
         }
+        case ^ASTProcReturn: {
+            procRet := new(ASTProcReturn)
+            procRet.from = type.from
+            procRet.type = type.type
+            procRet.index = type.index
+            out = AST(procRet)
+        }
     }
     return out
 }
@@ -682,8 +698,15 @@ astEq :: proc(a, b: AST) -> bool {
             vw, isWrite := b.(^ASTVarWrite)
             return isWrite && 
                 type.ident == vw.ident && 
-                vw.isGlobal != type.isGlobal &&
+                type.isGlobal != vw.isGlobal &&
                 astEq(type.value, vw.value)
+        }
+        case ^ASTProcReturn: {
+            pr, isProcRet := b.(^ASTProcReturn)
+            return isProcRet &&
+                type.from == pr.from &&
+                type.index == pr.index &&
+                type.type == pr.type 
         }
         case nil: {
             return b == nil

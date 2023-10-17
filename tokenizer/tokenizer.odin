@@ -63,14 +63,9 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                 append(&output, Token{.OBrace, tok.loc, nil})
             }
             case char == '.': { 
-                // Decimals
-                if val, _ := peekNext(&tok); isNum(val) {
-                    token := parseNumber(&tok) or_return
-                    append(&output, token)
-                    continue
-                }
-                return output, util.locStr(tok.loc, 
-                    "Expected number after decimal point\n")
+                // This will likely be changed later for more . uses
+                token := parseFloat(&tok, 0, tok.loc) or_return
+                append(&output, token)
             }
             case isNum(char): {
                 token := parseNumber(&tok) or_return
@@ -105,12 +100,11 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                         nestLevel -= 1
                         if nestLevel == 0 do break
                     } else if toSkip == '/' && nextIs(&tok, '*') {
-                        fmt.printf("Increased comment block\n")
                         nestLevel += 1
                     }                    
                 }
             }
-            
+            /* This is more of a semantic thing
             case char == '(': {
                 // Casting
                 loc := tok.loc
@@ -132,7 +126,7 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
                     return nil, util.locStr(tok.loc, 
                         "Invalid type of '%s'", str)
                 }
-            }
+            }*/
             case: {
                 parseIdent(&tok, &output) or_return
             }
@@ -187,57 +181,6 @@ parseIdent :: proc(tok:^Tokenizer, output:^[dynamic]Token) -> (util.ErrorMsg) {
     // Add back next char
     append(output, token)
     return nil
-}
-
-// Handles numeric tokens
-parseNumber :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
-    token : Token = {
-        type = .IntLit,
-        loc  = tok.loc,
-    }
-    value : f64 = 0
-    for curGood(tok) {
-        nextChar := curT(tok)
-        if !isNum(nextChar) && nextChar != '.' {
-            break
-        }
-        // Eat next character
-        next(tok)
-        if nextChar == '.' {
-            token.type = .FloatLit
-            // Read tail end of float
-            decimal : i32 = 0
-            power : i32 = 1
-            // Read the rest of the digits
-            for curGood(tok) {
-                if isNum(curT(tok)) {
-                    nex := curT(tok)
-                    decimal = (decimal * 10) + i32(nex - '0')
-                    power *= 10
-                } else if curIs(tok, '.') {
-                    return token, util.locStr(tok.loc, 
-                        "Invalid '.' after decimal of float")
-                } else {
-                    break
-                }
-                next(tok)
-            }
-            token.value = value + f64(decimal) / f64(power)
-            return token, nil
-        } else {
-            // That means its a digit
-            value = (value * 10) + f64(nextChar - '0')
-        }
-    }
-    if token.type == .IntLit {
-        token.value = int(value)
-    } else if token.type == .FloatLit {
-        token.value = f64(value)
-    } else {
-        assert(false, "BUG: This should not occur")
-    }
-    goBack(tok)
-    return token, nil
 }
 
 // Handles string literals
@@ -374,10 +317,15 @@ peekNext :: proc(tok:^Tokenizer) -> (u8, bool) {
     if tok.i + 1 >= len(tok.text) do return 0, false
     return tok.text[tok.i + 1], true
 }
-nextIs :: proc(tok:^Tokenizer, val:u8) -> (bool) {
+nextIsVal :: proc(tok:^Tokenizer, val:u8) -> (bool) {
     if tok.i + 1 >= len(tok.text) do return false
     return tok.text[tok.i + 1] == val
 }
+nextIsPredicate :: proc(tok:^Tokenizer, pred:proc(u8)->bool) -> bool {
+    if tok.i + 1 >= len(tok.text) do return false
+    return pred(tok.text[tok.i + 1])
+}
+nextIs :: proc{nextIsVal, nextIsPredicate}
 goBack :: proc(tok:^Tokenizer) {
     tok.i -= 1
     if tok.text[tok.i] == '\n' {

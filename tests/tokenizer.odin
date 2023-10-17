@@ -30,13 +30,69 @@ testLits :: proc(t:^testing.T) {
     validTest(t, "\"xyz\"", {
         {.StringLit, "xyz"}
     })
-    validTest(t, "\"\\n \\t \\\"\"", {
+    validTest(t, `"\n \t \""`, {
         {.StringLit, "\n \t \""}
     })
     invalidTest(t, "\"there is no end")
     invalidTest(t, "\"bad escape\\c\"")
     invalidTest(t, "\"No escape at end\\")
     validTest(t, "true false", {{.BoolLit, true}, {.BoolLit, false}})
+}
+
+@(test)
+testIntEscapes :: proc(t:^T) {
+    // Hex
+    validTest(t, "0x1", { 
+        {.IntLit, 1} 
+    })
+    validTest(t, "0x10", { 
+        {.IntLit, 16} 
+    })
+    validTest(t, "0x_f_F_", { 
+        {.IntLit, 255} 
+    })
+    validTest(t, "-0x__bEEf__", { 
+        {.IntLit, -48879} 
+    })
+    invalidTest(t, "0xabcdefg")
+    invalidTest(t, "0x ")
+
+    // Octal
+    validTest(t, "0o10", {
+        {.IntLit, 8}
+    })
+    validTest(t, "0o77", {
+        {.IntLit, 63}
+    })
+    invalidTest(t, "0o8_88")
+    invalidTest(t, "0o ")
+
+    // Binary
+    validTest(t, "0b1_10", {
+        {.IntLit, 6}
+    })
+    validTest(t, "0b111_1", {
+        {.IntLit, 15}
+    })
+    invalidTest(t, "0b01234")
+    invalidTest(t, "0b ")
+
+    // Roman numerals
+    validTest(t, "0rMDCCCLXXXVIII", {
+        {.IntLit, 1888}
+    })
+    
+    validTest(t, "0rMMDCCCLXXXVIII", {
+        {.IntLit, 2888}
+    })
+    validTest(t, "0rDIX", {
+        {.IntLit, 509}
+    })
+    validTest(t, "0rMIX", {
+        {.IntLit, 1009}
+    })
+    invalidTest(t, "0rWordsHere")
+    invalidTest(t, "0r ")
 }
 
 @(test)
@@ -70,6 +126,7 @@ testOps :: proc(t:^testing.T) {
     })
     validTest(t, "+-_,^", 
         {{.Ident, "+-_,^"}})
+
     validTest(t, `
         proc main :> {
             "Hello\n" puts drop
@@ -84,19 +141,57 @@ testOps :: proc(t:^testing.T) {
         {.Drop, nil},
         {.CBrace, nil}
     })
+
     validTest(t, "if true{}", 
         {{.If, nil},
         {.BoolLit, true},
         {.OBrace, nil},
         {.CBrace, nil},
     })
-    validTest(t, "let x = {5}", {
+    validTest(t, "let x = { 5 }", {
         {.Let, nil},
         {.Ident, "x"},
         {.Eq,nil},
         {.OBrace, nil},
         {.IntLit, 5},
         {.CBrace, nil}
+    })
+
+    validTest(t, "let x = 5", {
+        {.Let, nil},
+        {.Ident, "x"},
+        {.Eq,nil},
+        {.IntLit, 5},
+    })
+}
+
+@(test)
+testComments :: proc(t:^T) {
+    // Line comment
+    validTest(t, `
+        1 // "This shouldn't be a token"
+        "A" // Neither should this
+    `, {
+        {.IntLit, 1},
+        {.StringLit, "A"},
+    })
+    // Block comment
+    validTest(t, `
+        1 /* let
+        */ 2 +
+    `, {
+        {.IntLit, 1},
+        {.IntLit, 2},
+        {.Plus, nil}
+    })
+    // Nested block comment
+    validTest(t, `
+        1 /* let 
+        /* ignored words  */ 2 
+        */ +
+    `, {
+        {.IntLit, 1},
+        {.Plus, nil}
     })
 }
 

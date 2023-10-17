@@ -44,7 +44,9 @@ generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
 generateProcCall :: proc(sb: ^strings.Builder, procName:string, program:^ast.ASTProgram) {
     comment(sb, "Call to '%s'", procName)
     if procName not_in program.procs {
-        panic("Cannot generate proc call for proc that doesn't exist\n")
+        fmt.panicf(
+            "Cannot generate proc call '%s' for proc that doesn't exist\n", 
+            procName)
     }
     procc := program.procs[procName]
     nVars := procc.body.state.totalVars
@@ -450,6 +452,9 @@ generateNasmFromASTHelp :: proc(sb:^strings.Builder, ctx: ^ASMContext, as: ^ast.
             comment(sb, "End while %d", idx)
 
             // panic("TODO: While Generation\n")
+        }
+        case ^ASTProcReturn: {
+            // Nothing to do, value is already pushed
         }
     }
     return false

@@ -223,6 +223,7 @@ optimizeASTHelp :: proc(ast:^AST, state:^ASTState) -> (bool) {
         }
         case ^ASTPushLiteral, ^ASTVarRef, ^ASTInputParam, ^ASTProcCall: {}
         case ^ASTNip, ^ASTOver, ^ASTRot, ^ASTSwap, ^ASTDup: {}
+        case ^ASTProcReturn: {}
     }
     return changedSomething
 }
