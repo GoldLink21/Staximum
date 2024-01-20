@@ -59,9 +59,12 @@ tokenize :: proc(content : string, file: string="") -> (output:[dynamic]Token, e
         switch {
             // Skip Whitespace
             case isWhitespace(char), char == 0: {}
-            case char == '{': {
-                append(&output, Token{.OBrace, tok.loc, nil})
+            case char in splitsToken: {
+                append(&output, Token{splitsToken[char], tok.loc, nil})
             }
+            // case char == '{': {
+            //     append(&output, Token{.OBrace, tok.loc, nil})
+            // }
             case char == '.': { 
                 // This will likely be changed later for more . uses
                 token := parseFloat(&tok, 0, tok.loc) or_return
@@ -198,8 +201,14 @@ parseString :: proc(tok:^Tokenizer) -> (Token, util.ErrorMsg) {
             case '"':{
                 // End string
                 strings.write_string(&sb, tok.text[startIdx:tok.i])
+                // Handle c string
+                if n, ok := peekNext(tok); ok && n == 'c' {
+                    //TODO: C string
+                    token.type = .CString
+                    next(tok)
+                    strings.write_byte(&sb, 0)
+                }
                 token.value = strings.clone(strings.to_string(sb))
-                next(tok)
                 return token, nil
             }
             case '\\': {

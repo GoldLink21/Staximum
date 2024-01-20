@@ -69,6 +69,9 @@ There is also support for escape characters, those being:
 - \0 For use with c or the terminal
 - \" to insert a quote into the string
 
+You can also postfix a string with 'c' to make it into a c string. C strings do not push their length and end with a 0 byte
+"C string here"c
+
 Integers also have a few different variations
 - Hex with the common `0x` format that takes 0-9, a-f, A-F
 - Octals with `0o` that takes 0-7
@@ -137,9 +140,9 @@ if x @ 10 = then {
 The stack has to be the same going out of the if block as it was going in. You can also add an `else` block, and doing so requires both branches to have the same output types
 
 ```
-if false {
+if false then {
 
-} else if false {
+} else if false then {
 
 } else {
 
@@ -165,9 +168,12 @@ See the [Expected Syntax](./expectedSyntax.stax) for examples of what the syntax
 
 ## Feature Goals
 
-- [x] Variables
+- [ ] Variables (Needs work)
 - [x] Branching/Loops
 - [x] Functions/Procedures
 - [x] Macros/Inline Functions
+- [ ] Arrays
+- [ ] Structures
+- [ ] Multiple Returns
 - [ ] Optimizations
 - [ ] Other Assembly Formats

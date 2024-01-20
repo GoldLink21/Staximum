@@ -44,6 +44,9 @@ generateNasmToFile :: proc(program:^ast.ASTProgram, outFile:string) {
 generateProcCall :: proc(sb: ^strings.Builder, procName:string, program:^ast.ASTProgram) {
     comment(sb, "Call to '%s'", procName)
     if procName not_in program.procs {
+        if procName == "main" {
+            fmt.panicf("main proc does not exist\n")
+        }
         fmt.panicf(
             "Cannot generate proc call '%s' for proc that doesn't exist\n", 
             procName)
@@ -94,6 +97,7 @@ generateNasmFromProgram :: proc(program: ^ast.ASTProgram) -> string {
     for name,pr in program.procs {
         // TODO: Conform to some calling convention
         fmt.printf("Generating Proc %s\n", name)
+        comment(&sb, "Proc Def")
         fmt.sbprintf(&sb, "%s:\n", name)
         comment(&sb, "Reserve space for vars")
         pushReg(&sb, "rbp")

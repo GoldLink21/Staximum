@@ -367,6 +367,10 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             append(curAST, len)
             append(curAST, str)
         }
+        case .CString: {
+            cStr := resolveCString(ts, cur) or_return
+            append(curAST, cStr)
+        }
         case .BoolLit: {
             value := new(ASTPushLiteral)
             value ^= cur.value.(bool)
@@ -889,6 +893,12 @@ resolveNextToken :: proc(tw:^TokWalk, ts:^[dynamic]Type, program:^ASTProgram, va
             fmt.printf(" top\nQuiting Execution\n")
             os.exit(1)
         }
+        case .OBracket: {
+            return nil, "TODO: Obracket"
+        }
+        case .CBracket: {
+            return nil, "Close bracket cannot occur before an open one"
+        }
     }
     next(tw)
     return {}, nil
@@ -1046,6 +1056,14 @@ resolveStringLit :: proc(ts:^[dynamic]Type, strLit:Token) -> (^ASTPushLiteral, ^
     pushType(ts, .Ptr)
     return length, value, nil
 }
+
+resolveCString :: proc(ts:^[dynamic]Type, cStr:Token) -> (^ASTPushLiteral, ErrorMsg) {
+    value := new(ASTPushLiteral)
+    value ^= cStr.value.(string)
+    pushType(ts, .Ptr)
+    return value, nil
+}
+
 resolveBinOp :: proc(curAST:^[dynamic]AST, ts:^[dynamic]Type, tok:Token, opName:string, opType:ASTBinOps, inTypes:[]Type, outType:Type) -> (op:^ASTBinOp, err:ErrorMsg) {
     // Requires 2 things on the stack
     // expectTypes(ts, inTypes, opName, tok.loc) or_return

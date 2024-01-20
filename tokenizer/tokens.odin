@@ -12,7 +12,7 @@ TokenType :: enum {
     BoolLit,
     StringLit,
     FloatLit,
-    // CString,
+    CString,
     At, // Used for reading from variables
     If,
     Eq,
@@ -54,6 +54,8 @@ TokenType :: enum {
     // Syscall4,
     // Syscall5,
     // Syscall6,
+    OBracket,
+    CBracket,
 
 }
 // Converting strings to tokens
@@ -87,6 +89,8 @@ IdentifierTokens : map[string]TokenType = {
     "puts" = .Puts,
     "then" = .Then,
     "else" = .Else,
+    "[" = .OBracket,
+    "]" = .CBracket,
     "while" = .While,
     "macro" = .Macro,
     "import" = .Import,
@@ -96,7 +100,14 @@ IdentifierTokens : map[string]TokenType = {
     "syscall3" = .Syscall3,
 }
 
-// splitsToken :: bit_set['a','b']
+// These are tokens that need to be handled themselves
+splitsToken : map[u8]TokenType = {
+    // ',' = .Comma,
+    '[' = .OBracket,
+    ']' = .CBracket,
+    '{' = .OBrace,
+    '}' = .CBrace,
+}
 
 // Possible Values for a token
 TokenValue :: union {
@@ -117,6 +128,7 @@ printToken :: proc(using token:Token) {
         case .Ident:    fmt.printf("<Ident '%s'>", value.(string))
         case .BoolLit:  fmt.printf("<Bool '%s'>", value.(bool) ? "true" : "false")
         case .StringLit:fmt.printf("<%s>", util.escapeString(value.(string)))
+        case .CString  :fmt.printf("<c%s>", util.escapeString(value.(string)))
         case .Type:     fmt.printf("<(%s)>", types.TypeToString[value.(types.Type)])
         case .Cast:     fmt.printf("<cast(%s)>", types.TypeToString[value.(types.Type)])
         case .Eq:       fmt.printf("<=>")
@@ -151,6 +163,8 @@ printToken :: proc(using token:Token) {
         case .While:    fmt.printf("<While")
         case .Macro:    fmt.printf("<Macro>")
         case .Import:   fmt.printf("<Import>")
+        case .OBracket: fmt.printf("<[>")
+        case .CBracket: fmt.printf("<]>")
         case .Syscall0: fmt.printf("<Syscall0>")
         case .Syscall1: fmt.printf("<Syscall1>")
         case .Syscall2: fmt.printf("<Syscall2>")
