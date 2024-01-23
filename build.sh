@@ -2,7 +2,7 @@
 rm -f out out.o out.S stax
 
 # Control what is happening on build
-GENERATE_ASM=true
+GENERATE_ASM=false
 ASSEMBLE=true
 LINK=true
 RUN=true
@@ -17,7 +17,8 @@ if ! [ -f $IN_FILE ]; then
     exit 1
 fi
 
-odin build . -out:$OUT_EXE -define:GENERATE_ASM=$GENERATE_ASM # \
+odin build . -out:$OUT_EXE \
+    -define:GENERATE_ASM=$GENERATE_ASM # \
      # -define:$ASSEMBLE=true -define:LINK=$LINK
 
 # Only continue if ok

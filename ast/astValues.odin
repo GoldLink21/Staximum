@@ -115,6 +115,7 @@ ASTVarDecl :: struct {
     ident : string,
     // In the global scope
     isGlobal: bool,
+    type: types.Type,
 }
 // Reference for a var. Can become a write or read with different ops
 ASTVarRef :: struct {

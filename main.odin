@@ -5,6 +5,7 @@ import "core:fmt"
 import "./tokenizer"
 import "./generator"
 import "./ast"
+import "./simulator"
 
 DEFAULT_OUT_FILE_NAME :: "out"
 
@@ -63,6 +64,20 @@ main :: proc() {
     when  GENERATE_ASM {
         generator.generateNasmToFile(program, fmt.tprintf("%s.S", outFile))
         fmt.printf("\n$-------Made ASM--------$\n")
+    } else {
+        fmt.printf("\nv-------Simulate--------v\n")
+
+        simErr := simulator.simulateProgram(program)
+        if simErr != nil {
+            if simErr == "exit" {
+                fmt.printf("\nExited with code '%d'", simulator.ExitCode)
+
+            } else {
+                fmt.printf("Error: %s", simErr.(string))
+            }
+        }
+
+        fmt.printf("\n$-------Simulated-------$\n")
     }
 }
 

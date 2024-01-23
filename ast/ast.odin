@@ -1146,6 +1146,7 @@ resolveLet :: proc(startLoc : util.Location, tw : ^TokWalk,
     }
     var = new(ASTVarDecl)
     var.ident = varName
+    var.type = expectedType
     if isGlobal {
         program.globalVars[varName] = {
             // varName,

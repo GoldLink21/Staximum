@@ -55,6 +55,7 @@ let x = 1
 // Or you can initialize after a block, but 
 //  only when there is 1 value on the stack at the end
 let y = { 1 2 + }
+let z : int
 ```
 
 ## Literals
