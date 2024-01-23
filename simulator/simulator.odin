@@ -267,12 +267,10 @@ simulateAST :: proc(prg: ^Program, node:ast.AST) -> ErrorMsg {
                 newVariableFrame(prg)
                     simulateAST(prg, type.body) or_return
                 dropVariableFrame(prg)
-            } else {
-                if type.elseBlock != nil {
-                    newVariableFrame(prg)
-                        simulateAST(prg, type.elseBlock) or_return
-                    dropVariableFrame(prg)
-                }
+            } else if type.elseBlock != nil {
+                newVariableFrame(prg)
+                    simulateAST(prg, type.elseBlock) or_return
+                dropVariableFrame(prg)
             }
         }
         case ^ast.ASTWhile: {
@@ -284,7 +282,7 @@ simulateAST :: proc(prg: ^Program, node:ast.AST) -> ErrorMsg {
                 newVariableFrame(prg)
                     simulateAST(prg, type.body) or_return
                 dropVariableFrame(prg)
-                // Re-Evaluate
+                // Re-Evaluate condition
                 simulateASTList(prg, type.cond[:]) or_return
                 b = getInnerBool(pop(&prg.stack)) or_return
             }
